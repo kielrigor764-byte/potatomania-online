@@ -320,48 +320,109 @@ export default function Home() {
     setScreen("items");
   }
 
-  function centerProductCard(productId: string) {
-    const center = () => {
-      const card = productCardRefs.current[productId];
+  function centerProductCard(productId: string, smooth = true) {
+    const card = productCardRefs.current[productId];
 
-      if (!card) {
-        return;
-      }
-
-      // scrollIntoView with block:center reliably places the actual card
-      // in the middle of the viewport on both desktop and mobile.
-      card.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "nearest",
-      });
-    };
-
-    // Run immediately, then again after React finishes rendering.
-    center();
-    window.requestAnimationFrame(center);
-    window.setTimeout(center, 250);
-  }
-
-  useEffect(() => {
-    if (screen !== "items" || !selectedProduct) {
+    if (!card) {
       return;
     }
 
-    // Wait until the selected card and customization overlay have rendered,
-    // then place the selected menu card in the visual center of the screen.
-    centerProductCard(selectedProduct.id);
-  }, [screen, selectedProduct]);
+    // Do not let the clicked button's focus movement fight with our own
+    // scrolling. The card itself stays exactly where it is in the layout.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    const scrollElement = document.scrollingElement || document.documentElement;
+    const rect = card.getBoundingClientRect();
+    const currentScrollTop = scrollElement.scrollTop;
+    const cardCenter = rect.top + rect.height / 2;
+    const targetTop = Math.max(0, currentScrollTop + cardCenter - window.innerHeight / 2);
+
+    if (!smooth) {
+      scrollElement.scrollTop = targetTop;
+      return;
+    }
+
+    const startTop = scrollElement.scrollTop;
+    const distance = targetTop - startTop;
+
+    if (Math.abs(distance) < 2) {
+      scrollElement.scrollTop = targetTop;
+      return;
+    }
+
+    // Use our own short animation so even a card near the bottom of a long
+    // menu moves all the way to the middle instead of only nudging slightly.
+    const duration = Math.min(700, Math.max(350, 450 + Math.abs(distance) * 0.12));
+    const startTime = performance.now();
+
+    const animateScroll = (currentTime: number) => {
+      const progress = Math.min(1, (currentTime - startTime) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      scrollElement.scrollTop = startTop + distance * eased;
+
+      if (progress < 1) {
+        window.requestAnimationFrame(animateScroll);
+      } else {
+        scrollElement.scrollTop = targetTop;
+      }
+    };
+
+    window.requestAnimationFrame(animateScroll);
+  }
 
   function openProduct(product: Product) {
-    // Move the clicked menu card to the center immediately so the user
-    // never has to manually scroll back to find the selected item.
-    centerProductCard(product.id);
-    setSelectedProduct(product);
-    setSelectedToppings([]);
+    // First move the page so the clicked product is clearly visible in the
+    // center of the viewport. Only after the movement finishes do we open
+    // the customization panel, so the user can actually see the scroll.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
 
-    // Re-center after the selection/modal state has rendered as well.
-    window.requestAnimationFrame(() => centerProductCard(product.id));
+    const card = productCardRefs.current[product.id];
+
+    if (!card) {
+      setSelectedProduct(product);
+      setSelectedToppings([]);
+      return;
+    }
+
+    const scrollElement = document.scrollingElement || document.documentElement;
+    const rect = card.getBoundingClientRect();
+    const targetTop = Math.max(
+      0,
+      scrollElement.scrollTop + rect.top + rect.height / 2 - window.innerHeight / 2,
+    );
+    const startTop = scrollElement.scrollTop;
+    const distance = targetTop - startTop;
+
+    if (Math.abs(distance) < 2) {
+      scrollElement.scrollTop = targetTop;
+      setSelectedProduct(product);
+      setSelectedToppings([]);
+      return;
+    }
+
+    const duration = Math.min(700, Math.max(350, 450 + Math.abs(distance) * 0.12));
+    const startTime = performance.now();
+
+    const animateAndOpen = (currentTime: number) => {
+      const progress = Math.min(1, (currentTime - startTime) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      scrollElement.scrollTop = startTop + distance * eased;
+
+      if (progress < 1) {
+        window.requestAnimationFrame(animateAndOpen);
+        return;
+      }
+
+      scrollElement.scrollTop = targetTop;
+      setSelectedProduct(product);
+      setSelectedToppings([]);
+    };
+
+    window.requestAnimationFrame(animateAndOpen);
   }
 
   function toggleTopping(topping: AddOn) {
@@ -1105,6 +1166,7 @@ export default function Home() {
                 <button
                   key={`product-${product.id}`}
                   type="button"
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => openProduct(product)}
                   ref={(element) => {
                     productCardRefs.current[product.id] = element;
@@ -2724,7 +2786,7 @@ export default function Home() {
 
       <footer className="pm-footer relative z-10 mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
         <p className="font-black text-[#0756a8]">
-          Potatomania
+          PotatoMania
         </p>
 
         <p className="mt-1 text-sm font-semibold text-[#45627d]">
