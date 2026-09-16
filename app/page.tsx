@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toBlob } from "html-to-image";
 
 type Screen =
@@ -248,6 +248,8 @@ export default function Home() {
   const [selectedProduct, setSelectedProduct] =
     useState<Product | null>(null);
 
+  const productCardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
   const [selectedToppings, setSelectedToppings] =
     useState<AddOn[]>([]);
 
@@ -264,6 +266,11 @@ export default function Home() {
 
   const [orderDate, setOrderDate] = useState("");
 
+  type PaymentMethod = "GCash" | "Pay Upon Receiving" | null;
+
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethod>(null);
+
   const [gcashPaid, setGcashPaid] = useState(false);
 
   const [paymentScreenshot, setPaymentScreenshot] = useState<File | null>(null);
@@ -271,6 +278,8 @@ export default function Home() {
   const [gcashReference, setGcashReference] = useState("");
 
   const [isSavingOrder, setIsSavingOrder] = useState(false);
+
+  const [isDrivingToMenu, setIsDrivingToMenu] = useState(false);
 
   useEffect(() => {
     window.scrollTo({
@@ -290,7 +299,18 @@ export default function Home() {
 
   function chooseFulfillment(option: Fulfillment) {
     setFulfillment(option);
-    setScreen("categories");
+    setPaymentMethod(option === "Delivery" ? "GCash" : null);
+    setGcashPaid(false);
+    setPaymentScreenshot(null);
+    setGcashReference("");
+
+    // Play the PotatoMania ride animation first, then reveal the menu.
+    setIsDrivingToMenu(true);
+
+    window.setTimeout(() => {
+      setIsDrivingToMenu(false);
+      setScreen("categories");
+    }, 1550);
   }
 
   function openCategory(categoryId: string) {
@@ -300,9 +320,48 @@ export default function Home() {
     setScreen("items");
   }
 
+  function centerProductCard(productId: string) {
+    const center = () => {
+      const card = productCardRefs.current[productId];
+
+      if (!card) {
+        return;
+      }
+
+      // scrollIntoView with block:center reliably places the actual card
+      // in the middle of the viewport on both desktop and mobile.
+      card.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+    };
+
+    // Run immediately, then again after React finishes rendering.
+    center();
+    window.requestAnimationFrame(center);
+    window.setTimeout(center, 250);
+  }
+
+  useEffect(() => {
+    if (screen !== "items" || !selectedProduct) {
+      return;
+    }
+
+    // Wait until the selected card and customization overlay have rendered,
+    // then place the selected menu card in the visual center of the screen.
+    centerProductCard(selectedProduct.id);
+  }, [screen, selectedProduct]);
+
   function openProduct(product: Product) {
+    // Move the clicked menu card to the center immediately so the user
+    // never has to manually scroll back to find the selected item.
+    centerProductCard(product.id);
     setSelectedProduct(product);
     setSelectedToppings([]);
+
+    // Re-center after the selection/modal state has rendered as well.
+    window.requestAnimationFrame(() => centerProductCard(product.id));
   }
 
   function toggleTopping(topping: AddOn) {
@@ -343,8 +402,10 @@ export default function Home() {
       newCartItem,
     ]);
 
+    const productId = selectedProduct.id;
     setSelectedProduct(null);
     setSelectedToppings([]);
+    centerProductCard(productId);
   }
 
   function increaseQuantity(itemId: string) {
@@ -425,19 +486,38 @@ export default function Home() {
   }
 
   async function generateReceipt() {
-    if (!gcashPaid) {
-      alert("Please confirm that you have completed your GCash payment first.");
+    const isMeetup = fulfillment === "Meetup";
+    const isPayUponReceiving =
+      isMeetup && paymentMethod === "Pay Upon Receiving";
+
+    if (!isMeetup && fulfillment !== "Delivery") {
+      alert("Please select a fulfillment method first.");
+      setScreen("fulfillment");
       return;
     }
 
-    if (!gcashReference.trim()) {
-      alert("Please enter your GCash payment reference number.");
+    if (isMeetup && !paymentMethod) {
+      alert("Please choose how you would like to pay for your meet-up order.");
       return;
     }
 
-    if (!paymentScreenshot) {
-      alert("Please upload a screenshot of your GCash payment before securing your pre-order.");
-      return;
+    if (!isPayUponReceiving) {
+      if (!gcashPaid) {
+        alert("Please confirm that you have completed your GCash payment first.");
+        return;
+      }
+
+      if (!gcashReference.trim()) {
+        alert("Please enter your GCash payment reference number.");
+        return;
+      }
+
+      if (!paymentScreenshot) {
+        alert(
+          "Please upload a screenshot of your GCash payment before securing your pre-order.",
+        );
+        return;
+      }
     }
 
     if (cart.length === 0) {
@@ -465,25 +545,33 @@ export default function Home() {
     setIsSavingOrder(true);
 
     const newOrderId = createOrderId();
-    const screenshotPath = `${newOrderId}/${Date.now()}-${paymentScreenshot.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
-    const screenshotUploadUrl = `${supabaseUrl}/storage/v1/object/payment-screenshots/${screenshotPath}`;
-    const screenshotPublicUrl = `${supabaseUrl}/storage/v1/object/public/payment-screenshots/${screenshotPath}`;
 
     try {
-      const uploadResponse = await fetch(screenshotUploadUrl, {
-        method: "POST",
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-          "Content-Type": paymentScreenshot.type || "application/octet-stream",
-          "x-upsert": "false",
-        },
-        body: paymentScreenshot,
-      });
+      let screenshotPublicUrl = "";
 
-      if (!uploadResponse.ok) {
-        const uploadError = await uploadResponse.text();
-        throw new Error(uploadError || "The payment screenshot could not be uploaded.");
+      if (paymentScreenshot) {
+        const screenshotPath = `${newOrderId}/${Date.now()}-${paymentScreenshot.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+        const screenshotUploadUrl = `${supabaseUrl}/storage/v1/object/payment-screenshots/${screenshotPath}`;
+        screenshotPublicUrl = `${supabaseUrl}/storage/v1/object/public/payment-screenshots/${screenshotPath}`;
+
+        const uploadResponse = await fetch(screenshotUploadUrl, {
+          method: "POST",
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            "Content-Type":
+              paymentScreenshot.type || "application/octet-stream",
+            "x-upsert": "false",
+          },
+          body: paymentScreenshot,
+        });
+
+        if (!uploadResponse.ok) {
+          const uploadError = await uploadResponse.text();
+          throw new Error(
+            uploadError || "The payment screenshot could not be uploaded.",
+          );
+        }
       }
 
       const orderPayload = {
@@ -493,9 +581,13 @@ export default function Home() {
         fulfillment_type: fulfillment ?? "Not specified",
         items: cart,
         total_amount: getCartTotal(),
-        gcash_reference: gcashReference.trim(),
-        payment_screenshot_url: screenshotPublicUrl,
-        payment_status: "Pending",
+        gcash_reference: isPayUponReceiving ? "" : gcashReference.trim(),
+        payment_screenshot_url: isPayUponReceiving
+          ? ""
+          : screenshotPublicUrl,
+        payment_status: isPayUponReceiving
+          ? "Pay Upon Receiving"
+          : "Pending",
         notes: customerInfo.notes.trim(),
       };
 
@@ -525,7 +617,8 @@ export default function Home() {
       setScreen("receipt");
     } catch (error) {
       console.error("PotatoMania order submission failed:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       alert(`We could not save your order.\n\nDetails: ${errorMessage}`);
     } finally {
       setIsSavingOrder(false);
@@ -536,7 +629,9 @@ export default function Home() {
     const receiptElement = document.getElementById("potatomania-receipt");
 
     if (!receiptElement) {
-      alert("Receipt could not be found. Please try again.");
+      alert(
+        `${fulfillment === "Meetup" ? "Invoice" : "Receipt"} could not be found. Please try again.`,
+      );
       return;
     }
 
@@ -612,10 +707,13 @@ export default function Home() {
       });
 
       if (!blob) {
-        throw new Error("Receipt image could not be created.");
+        throw new Error(
+          `${fulfillment === "Meetup" ? "Invoice" : "Receipt"} image could not be created.`,
+        );
       }
 
-      const fileName = `PotatoMania-Receipt-${orderId || "order"}.png`;
+      const documentType = fulfillment === "Meetup" ? "Invoice" : "Receipt";
+      const fileName = `PotatoMania-${documentType}-${orderId || "order"}.png`;
       const file = new File([blob], fileName, { type: "image/png" });
 
       if (
@@ -625,8 +723,8 @@ export default function Home() {
         navigator.canShare({ files: [file] })
       ) {
         await navigator.share({
-          title: "PotatoMania Receipt",
-          text: "Here is my PotatoMania order receipt.",
+          title: `PotatoMania ${documentType}`,
+          text: `Here is my PotatoMania order ${documentType.toLowerCase()}.`,
           files: [file],
         });
         return;
@@ -644,11 +742,11 @@ export default function Home() {
 
         if (!imageWindow) {
           alert(
-            "Your browser blocked the receipt image window. Please allow pop-ups for this site and try again.",
+            `Your browser blocked the ${documentType.toLowerCase()} image window. Please allow pop-ups for this site and try again.`,
           );
         } else {
           alert(
-            "Your receipt image is open in a new tab. Press and hold the image, then choose Save Image or Download Image.",
+            `Your ${documentType.toLowerCase()} image is open in a new tab. Press and hold the image, then choose Save Image or Download Image.`,
           );
         }
 
@@ -669,7 +767,11 @@ export default function Home() {
       }
 
       console.error("Receipt image error:", error);
-      alert("We could not create the receipt image. Please try again.");
+      alert(
+        `We could not create the ${
+          fulfillment === "Meetup" ? "invoice" : "receipt"
+        } image. Please try again.`,
+      );
     } finally {
       captureHost?.remove();
     }
@@ -681,6 +783,7 @@ export default function Home() {
   }
 
   function resetOrder() {
+    setIsDrivingToMenu(false);
     setScreen("welcome");
     setFulfillment(null);
     setSelectedCategory(null);
@@ -694,6 +797,10 @@ export default function Home() {
     });
     setOrderId("");
     setOrderDate("");
+    setPaymentMethod(null);
+    setGcashPaid(false);
+    setPaymentScreenshot(null);
+    setGcashReference("");
   }
 
   function goBackToCategories() {
@@ -704,8 +811,28 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f8fbff] pb-32 text-[#12304f]">
-      <header className="border-b-4 border-[#0756a8] bg-white">
+    <main className="pm-shell relative min-h-screen overflow-x-hidden bg-[#f8fbff] pb-32 text-[#12304f]">
+      <div className="pm-bg" aria-hidden="true">
+        <span className="pm-orb pm-orb-blue" />
+        <span className="pm-orb pm-orb-orange" />
+        <span className="pm-orb pm-orb-light" />
+
+        <span className="pm-potato pm-potato-one">🥔</span>
+        <span className="pm-potato pm-potato-two">🥔</span>
+        <span className="pm-potato pm-potato-three">🥔</span>
+        <span className="pm-potato pm-potato-four">🥔</span>
+
+        <span className="pm-cheese pm-cheese-one"><i /><i /><i /></span>
+        <span className="pm-cheese pm-cheese-two"><i /><i /><i /></span>
+        <span className="pm-cheese pm-cheese-three"><i /><i /><i /></span>
+        <span className="pm-cheese pm-cheese-four"><i /><i /><i /></span>
+
+        <span className="pm-spark pm-spark-one">✦</span>
+        <span className="pm-spark pm-spark-two">✦</span>
+        <span className="pm-spark pm-spark-three">✦</span>
+        <span className="pm-spark pm-spark-four">✦</span>
+      </div>
+      <header className="pm-header relative z-20 border-b-4 border-[#0756a8] bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-4">
           <button
             type="button"
@@ -732,7 +859,7 @@ export default function Home() {
           {screen !== "welcome" &&
             screen !== "fulfillment" &&
             screen !== "success" && (
-              <div className="rounded-full bg-[#fff4b8] px-4 py-2 text-sm font-black text-[#0756a8]">
+              <div className="pm-progress rounded-full bg-[#fff4b8] px-4 py-2 text-sm font-black text-[#0756a8]">
                 {screen === "categories" && "Step 1 of 5"}
                 {screen === "items" && "Step 2 of 5"}
                 {screen === "cart" && "Step 3 of 5"}
@@ -743,7 +870,58 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-5xl px-5 py-8">
+      {isDrivingToMenu && (
+        <div
+          className="pm-drive-transition fixed inset-0 z-[100] overflow-hidden bg-[#fff8dc]"
+          aria-live="polite"
+          aria-label="PotatoMania crew driving to the menu"
+        >
+          <div className="pm-drive-sky" />
+          <div className="pm-drive-glow pm-drive-glow-one" />
+          <div className="pm-drive-glow pm-drive-glow-two" />
+
+          <div className="pm-drive-speed pm-drive-speed-one" />
+          <div className="pm-drive-speed pm-drive-speed-two" />
+          <div className="pm-drive-speed pm-drive-speed-three" />
+          <div className="pm-drive-speed pm-drive-speed-four" />
+          <div className="pm-drive-speed pm-drive-speed-five" />
+          <div className="pm-drive-speed pm-drive-speed-six" />
+
+          <div className="pm-drive-road" />
+
+          <div className="pm-drive-dust pm-drive-dust-one" />
+          <div className="pm-drive-dust pm-drive-dust-two" />
+          <div className="pm-drive-dust pm-drive-dust-three" />
+          <div className="pm-drive-dust pm-drive-dust-four" />
+
+          <div className="pm-drive-potatoes" aria-hidden="true">
+            <span className="pm-drive-potato pm-drive-potato-01">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-02">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-03">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-04">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-05">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-06">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-07">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-08">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-09">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-10">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-11">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-12">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-13">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-14">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-15">🥔</span>
+            <span className="pm-drive-potato pm-drive-potato-16">🥔</span>
+          </div>
+
+          <img
+            src="/delivery.png"
+            alt="PotatoMania crew driving"
+            className="pm-drive-vehicle"
+          />
+        </div>
+      )}
+
+      <section className="pm-content relative z-10 mx-auto max-w-5xl px-5 py-8">
         {screen === "welcome" && (
           <div className="flex min-h-[70vh] flex-col items-center justify-center text-center">
             <div className="rounded-[2.5rem] border-4 border-[#0756a8] bg-white px-7 py-10 shadow-[10px_10px_0_#f28c28]">
@@ -832,8 +1010,8 @@ export default function Home() {
                   </h2>
 
                   <p className="mt-2 font-semibold text-[#45627d]">
-                    The customer books a rider separately for
-                    pickup and delivery.
+                    We will arrange a rider and you can
+                    pay them directly upon arrival.
                   </p>
                 </button>
               </div>
@@ -928,6 +1106,9 @@ export default function Home() {
                   key={`product-${product.id}`}
                   type="button"
                   onClick={() => openProduct(product)}
+                  ref={(element) => {
+                    productCardRefs.current[product.id] = element;
+                  }}
                   className={`rounded-[2rem] border-4 p-6 text-left transition hover:-translate-y-1 ${
                     product.id === "tornado-cheese"
                       ? "border-[#e3a51d] bg-[#fff0a6] shadow-[6px_6px_0_#e3a51d] hover:bg-[#ffe58a]"
@@ -1003,8 +1184,10 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => {
+                        const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
+                        if (productId) centerProductCard(productId);
                       }}
                       className="rounded-full bg-[#e9f4ff] px-4 py-2 font-black text-[#0756a8] hover:bg-[#d8ebff]"
                     >
@@ -1068,8 +1251,10 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => {
+                        const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
+                        if (productId) centerProductCard(productId);
                       }}
                       className="rounded-full border-4 border-[#0756a8] px-6 py-3 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]"
                     >
@@ -1356,7 +1541,7 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "You will need to book a rider separately for pickup and delivery."}
+                      : "We will arrange a rider and you can for pickup and delivery."}
                   </p>
                 </div>
 
@@ -1429,146 +1614,334 @@ export default function Home() {
               </h1>
 
               <p className="mt-3 max-w-2xl font-semibold text-[#45627d]">
-                Review your order details, fill in your customer information, pay the confirmed amount through GCash, confirm payment, then generate and save your receipt image.
+                Review your order details and choose how you would like to
+                complete payment before securing your pre-order.
               </p>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="space-y-6">
                 <div className="rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 shadow-[6px_6px_0_#d8eaff]">
-                  <h2 className="text-2xl font-black text-[#0756a8]">Customer Information</h2>
+                  <h2 className="text-2xl font-black text-[#0756a8]">
+                    Customer Information
+                  </h2>
                   <div className="mt-5 space-y-3">
                     <div>
-                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">Full Name</p>
-                      <p className="mt-1 font-bold text-[#45627d]">{customerInfo.name}</p>
+                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">
+                        Full Name
+                      </p>
+                      <p className="mt-1 font-bold text-[#45627d]">
+                        {customerInfo.name}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">Contact</p>
-                      <p className="mt-1 font-bold text-[#45627d]">{customerInfo.contact}</p>
+                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">
+                        Contact
+                      </p>
+                      <p className="mt-1 font-bold text-[#45627d]">
+                        {customerInfo.contact}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">Notes</p>
+                      <p className="text-sm font-black uppercase tracking-wide text-[#f28c28]">
+                        Notes
+                      </p>
                       <p className="mt-1 whitespace-pre-wrap font-bold text-[#45627d]">
-                        {customerInfo.notes.trim() ? customerInfo.notes : "No additional notes"}
+                        {customerInfo.notes.trim()
+                          ? customerInfo.notes
+                          : "No additional notes"}
                       </p>
                     </div>
                   </div>
                 </div>
 
                 <div className="rounded-[2rem] border-4 border-[#0756a8] bg-[#fff4b8] p-6">
-                  <h2 className="text-2xl font-black text-[#0756a8]">Fulfillment Method</h2>
+                  <h2 className="text-2xl font-black text-[#0756a8]">
+                    Fulfillment Method
+                  </h2>
                   <p className="mt-3 font-black text-[#45627d]">
                     {fulfillment === "Meetup" ? "Meet-up" : "Delivery"}
                   </p>
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "You will need to book a rider separately for pickup and delivery."}
+                      : "We will arrange a rider and you can pay them directly upon arrival."}
                   </p>
                 </div>
 
                 <div className="rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 shadow-[6px_6px_0_#fff0a6]">
-                  <h2 className="text-2xl font-black text-[#0756a8]">Your Order</h2>
+                  <h2 className="text-2xl font-black text-[#0756a8]">
+                    Your Order
+                  </h2>
                   <div className="mt-5 space-y-4">
                     {cart.map((item) => (
-                      <div key={`payment-item-${item.id}`} className="border-b-2 border-[#e9f4ff] pb-4">
+                      <div
+                        key={`payment-item-${item.id}`}
+                        className="border-b-2 border-[#e9f4ff] pb-4"
+                      >
                         <div className="flex justify-between gap-4">
-                          <p className="font-black text-[#0756a8]">{item.name}</p>
-                          <p className="font-black text-[#0756a8]">×{item.quantity}</p>
+                          <p className="font-black text-[#0756a8]">
+                            {item.name}
+                          </p>
+                          <p className="font-black text-[#0756a8]">
+                            ×{item.quantity}
+                          </p>
                         </div>
                         {item.toppings.length > 0 && (
                           <p className="mt-1 text-sm font-semibold text-[#45627d]">
-                            Toppings: {item.toppings.map((topping) => `${topping.name} (+${formatPrice(topping.price)})`).join(", ")}
+                            Toppings:{" "}
+                            {item.toppings
+                              .map(
+                                (topping) =>
+                                  `${topping.name} (+${formatPrice(topping.price)})`,
+                              )
+                              .join(", ")}
                           </p>
                         )}
-                        <p className="mt-1 font-bold text-[#f28c28]">{formatPrice(item.price)}</p>
+                        <p className="mt-1 font-bold text-[#f28c28]">
+                          {formatPrice(item.price)}
+                        </p>
                       </div>
                     ))}
                   </div>
+
                   <div className="mt-5 flex items-center justify-between gap-4">
-                    <span className="font-black text-[#0756a8]">Total Items</span>
-                    <span className="text-2xl font-black text-[#0756a8]">{cartQuantity}</span>
+                    <span className="font-black text-[#0756a8]">
+                      Total Items
+                    </span>
+                    <span className="text-2xl font-black text-[#0756a8]">
+                      {cartQuantity}
+                    </span>
                   </div>
-                  <p className="mt-4 text-sm font-semibold leading-relaxed text-[#45627d]">
-                    Please pay the exact Order Total shown above through GCash before confirming your payment.
-                  </p>
+
+                  <div className="mt-5 flex items-center justify-between gap-4 border-t-2 border-[#e9f4ff] pt-4">
+                    <span className="font-black text-[#0756a8]">
+                      Order Total
+                    </span>
+                    <span className="text-2xl font-black text-[#0756a8]">
+                      {formatPrice(getCartTotal())}
+                    </span>
+                  </div>
                 </div>
               </div>
 
               <div className="space-y-6">
-                <div className="rounded-[2rem] border-4 border-[#0756a8] bg-[#fff4b8] p-6 shadow-[6px_6px_0_#d8eaff]">
-                  <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">Required Before Receipt</p>
-                  <h2 className="mt-2 text-3xl font-black text-[#0756a8]">Pay via GCash First</h2>
-                  <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
-                    After filling in your customer information, pay the confirmed total using the GCash QR code and GCash number shown below. Once payment is complete, confirm it to generate your receipt.
-                  </p>
-                  <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4 text-center">
-                    <p className="font-black text-[#0756a8]">GCash Payment Details</p>
-                    <p className="mt-2 font-black text-[#0756a8]">Scan the QR code to pay</p>
-                    <div className="mt-4 flex justify-center">
-                      <img
-                        src="/gcash-qr.jpeg"
-                        alt="PotatoMania GCash QR code"
-                        className="h-auto w-full max-w-[320px] rounded-xl object-contain"
+                {fulfillment === "Meetup" ? (
+                  <div className="rounded-[2rem] border-4 border-[#0756a8] bg-[#fff4b8] p-6 shadow-[6px_6px_0_#d8eaff]">
+                    <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                      Payment Options
+                    </p>
+                    <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+                      How would you like to pay?
+                    </h2>
+                    <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
+                      For meet-up orders, you may pay when you receive your
+                      order or pay through GCash in advance.
+                    </p>
+
+                    <div className="mt-5 grid gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod("Pay Upon Receiving");
+                          setGcashPaid(false);
+                          setPaymentScreenshot(null);
+                          setGcashReference("");
+                        }}
+                        className={`rounded-2xl border-4 p-4 text-left transition ${
+                          paymentMethod === "Pay Upon Receiving"
+                            ? "border-[#0756a8] bg-[#0756a8] text-white"
+                            : "border-[#0756a8] bg-white text-[#0756a8] hover:bg-[#e9f4ff]"
+                        }`}
+                      >
+                        <p className="text-lg font-black">
+                          Pay Upon Receiving
+                        </p>
+                        <p
+                          className={`mt-1 text-sm font-semibold ${
+                            paymentMethod === "Pay Upon Receiving"
+                              ? "text-white/90"
+                              : "text-[#45627d]"
+                          }`}
+                        >
+                          No payment is required now. You will pay the exact
+                          amount shown on your invoice when you receive your
+                          order.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("GCash")}
+                        className={`rounded-2xl border-4 p-4 text-left transition ${
+                          paymentMethod === "GCash"
+                            ? "border-[#0756a8] bg-[#0756a8] text-white"
+                            : "border-[#0756a8] bg-white text-[#0756a8] hover:bg-[#e9f4ff]"
+                        }`}
+                      >
+                        <p className="text-lg font-black">Pay via GCash</p>
+                        <p
+                          className={`mt-1 text-sm font-semibold ${
+                            paymentMethod === "GCash"
+                              ? "text-white/90"
+                              : "text-[#45627d]"
+                          }`}
+                        >
+                          Pay the confirmed amount in advance and submit your
+                          payment details.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-[2rem] border-4 border-[#0756a8] bg-[#fff4b8] p-6 shadow-[6px_6px_0_#d8eaff]">
+                    <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                      Required Before Receipt
+                    </p>
+                    <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+                      Pay via GCash First
+                    </h2>
+                    <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
+                      Delivery orders must be paid through GCash before the
+                      pre-order can be secured.
+                    </p>
+                  </div>
+                )}
+
+                {(fulfillment === "Delivery" ||
+                  paymentMethod === "GCash") && (
+                  <div className="rounded-[2rem] border-4 border-[#0756a8] bg-[#fff4b8] p-6 shadow-[6px_6px_0_#d8eaff]">
+                    <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                      GCash Payment
+                    </p>
+                    <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+                      Pay via GCash
+                    </h2>
+                    <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
+                      Pay the confirmed Order Total using the GCash QR code or
+                      GCash number below.
+                    </p>
+
+                    <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4 text-center">
+                      <p className="font-black text-[#0756a8]">
+                        GCash Payment Details
+                      </p>
+                      <p className="mt-2 font-black text-[#0756a8]">
+                        Scan the QR code to pay
+                      </p>
+                      <div className="mt-4 flex justify-center">
+                        <img
+                          src="/gcash-qr.jpeg"
+                          alt="PotatoMania GCash QR code"
+                          className="h-auto w-full max-w-[320px] rounded-xl object-contain"
+                        />
+                      </div>
+                      <p className="mt-4 text-sm font-bold text-[#45627d]">
+                        GCash Number
+                      </p>
+                      <p className="mt-1 text-2xl font-black tracking-wide text-[#0756a8]">
+                        09568075788
+                      </p>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4">
+                      <label
+                        className="block font-black text-[#0756a8]"
+                        htmlFor="gcash-reference"
+                      >
+                        GCash Payment Reference Number
+                      </label>
+                      <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
+                        Enter the reference number shown on your successful
+                        GCash transaction.
+                      </p>
+                      <input
+                        id="gcash-reference"
+                        type="text"
+                        value={gcashReference}
+                        onChange={(event) =>
+                          setGcashReference(event.target.value)
+                        }
+                        placeholder="Enter GCash reference number"
+                        className="mt-3 block w-full rounded-xl border-2 border-[#d8eaff] bg-white p-3 text-sm font-bold text-[#45627d] outline-none focus:border-[#0756a8]"
                       />
                     </div>
-                    <p className="mt-4 text-sm font-bold text-[#45627d]">GCash Number</p>
-                    <p className="mt-1 text-2xl font-black tracking-wide text-[#0756a8]">09568075788</p>
-                  </div>
-                  <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4">
-                    <label className="block font-black text-[#0756a8]" htmlFor="gcash-reference">
-                      GCash Payment Reference Number
-                    </label>
-                    <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
-                      Enter the reference number shown on your successful GCash transaction.
-                    </p>
-                    <input
-                      id="gcash-reference"
-                      type="text"
-                      value={gcashReference}
-                      onChange={(event) => setGcashReference(event.target.value)}
-                      placeholder="Enter GCash reference number"
-                      className="mt-3 block w-full rounded-xl border-2 border-[#d8eaff] bg-white p-3 text-sm font-bold text-[#45627d] outline-none focus:border-[#0756a8]"
-                    />
-                  </div>
-                  <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4">
-                    <label className="block font-black text-[#0756a8]" htmlFor="payment-screenshot">
-                      Upload GCash Payment Screenshot
-                    </label>
-                    <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
-                      Upload a clear screenshot of your successful GCash payment. This is required before your pre-order can be secured.
-                    </p>
-                    <input
-                      id="payment-screenshot"
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => setPaymentScreenshot(event.target.files?.[0] ?? null)}
-                      className="mt-3 block w-full rounded-xl border-2 border-[#d8eaff] bg-white p-3 text-sm font-bold text-[#45627d]"
-                    />
-                    {paymentScreenshot && (
-                      <p className="mt-2 text-sm font-black text-[#0756a8]">
-                        Selected: {paymentScreenshot.name}
+
+                    <div className="mt-5 rounded-2xl border-2 border-[#0756a8] bg-white p-4">
+                      <label
+                        className="block font-black text-[#0756a8]"
+                        htmlFor="payment-screenshot"
+                      >
+                        Upload GCash Payment Screenshot
+                      </label>
+                      <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
+                        Upload a clear screenshot of your successful GCash
+                        payment. This is required before your pre-order can be
+                        secured.
                       </p>
-                    )}
+                      <input
+                        id="payment-screenshot"
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) =>
+                          setPaymentScreenshot(
+                            event.target.files?.[0] ?? null,
+                          )
+                        }
+                        className="mt-3 block w-full rounded-xl border-2 border-[#d8eaff] bg-white p-3 text-sm font-bold text-[#45627d]"
+                      />
+                      {paymentScreenshot && (
+                        <p className="mt-2 text-sm font-black text-[#0756a8]">
+                          Selected: {paymentScreenshot.name}
+                        </p>
+                      )}
+                    </div>
+
+                    <label className="mt-4 flex items-start gap-3 font-bold text-[#45627d]">
+                      <input
+                        type="checkbox"
+                        checked={gcashPaid}
+                        onChange={(event) => setGcashPaid(event.target.checked)}
+                        className="mt-1 h-5 w-5 accent-[#0756a8]"
+                      />
+                      I confirm that I have already paid the confirmed amount
+                      through GCash.
+                    </label>
                   </div>
-                  <label className="mt-4 flex items-start gap-3 font-bold text-[#45627d]">
-                    <input
-                      type="checkbox"
-                      checked={gcashPaid}
-                      onChange={(event) => setGcashPaid(event.target.checked)}
-                      className="mt-1 h-5 w-5 accent-[#0756a8]"
-                    />
-                    I confirm that I have already paid the confirmed amount through GCash.
-                  </label>
-                  <button
-                    type="button"
-                    onClick={generateReceipt}
-                    disabled={isSavingOrder}
-                    className="mt-6 w-full rounded-full border-4 border-[#0756a8] bg-[#0756a8] px-6 py-4 font-black text-white transition hover:bg-[#064783] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSavingOrder ? "Saving Order..." : "Generate Receipt After Payment"}
-                  </button>
-                </div>
+                )}
+
+                {fulfillment === "Meetup" &&
+                  paymentMethod === "Pay Upon Receiving" && (
+                    <div className="rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 shadow-[6px_6px_0_#fff0a6]">
+                      <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                        No Payment Required Now
+                      </p>
+                      <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+                        Pay when you receive your order
+                      </h2>
+                      <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
+                        You can finalize your meet-up order now. Your invoice
+                        will show the exact amount due when you receive your
+                        order.
+                      </p>
+                    </div>
+                  )}
+
+                <button
+                  type="button"
+                  onClick={generateReceipt}
+                  disabled={
+                    isSavingOrder ||
+                    (fulfillment === "Meetup" && !paymentMethod)
+                  }
+                  className="w-full rounded-full border-4 border-[#0756a8] bg-[#0756a8] px-6 py-4 font-black text-white transition hover:bg-[#064783] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingOrder
+                    ? "Saving Order..."
+                    : fulfillment === "Meetup"
+                      ? "Finalize Meet-up Order"
+                      : "Generate Receipt After Payment"}
+                </button>
               </div>
             </div>
           </div>
@@ -1577,10 +1950,18 @@ export default function Home() {
         {screen === "receipt" && (
           <div>
             <div className="mb-8 print:hidden">
-              <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">Receipt Ready</p>
-              <h1 className="mt-2 text-4xl font-black text-[#0756a8] sm:text-5xl">Your Order Receipt</h1>
+              <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                {fulfillment === "Meetup" ? "Invoice Ready" : "Receipt Ready"}
+              </p>
+              <h1 className="mt-2 text-4xl font-black text-[#0756a8] sm:text-5xl">
+                {fulfillment === "Meetup"
+                  ? "Your Order Invoice"
+                  : "Your Order Receipt"}
+              </h1>
               <p className="mt-3 max-w-2xl font-semibold text-[#45627d]">
-                Save this receipt, then send it to PotatoMania through our official Facebook or Instagram DM to continue your pre-order.
+                {fulfillment === "Meetup"
+                  ? "Save this invoice. It contains the details of your meet-up order and the amount due when you receive it."
+                  : "Save this receipt, then send it to PotatoMania through our official Facebook or Instagram DM to continue your pre-order."}
               </p>
             </div>
 
@@ -1588,7 +1969,9 @@ export default function Home() {
               <div className="text-center">
                 <img src="/potman-logo.png" alt="PotatoMania logo" className="mx-auto h-24 w-24 object-contain" />
                 <p className="mt-3 text-sm font-black uppercase tracking-widest text-[#f28c28]">PotatoMania</p>
-                <h2 className="mt-2 text-3xl font-black text-[#0756a8]">Order Receipt</h2>
+                <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+                  {fulfillment === "Meetup" ? "Order Invoice" : "Order Receipt"}
+                </h2>
                 <p className="mt-2 text-sm font-semibold text-[#45627d]">Baked, Loaded & Loved.</p>
               </div>
 
@@ -1602,6 +1985,12 @@ export default function Home() {
                 <p className="font-bold text-[#45627d]"><span className="font-black text-[#0756a8]">Name:</span> {customerInfo.name}</p>
                 <p className="font-bold text-[#45627d]"><span className="font-black text-[#0756a8]">Contact:</span> {customerInfo.contact}</p>
                 <p className="font-bold text-[#45627d]"><span className="font-black text-[#0756a8]">Fulfillment:</span> {fulfillment === "Meetup" ? "Meet-up" : "Delivery"}</p>
+                {fulfillment === "Meetup" && (
+                  <p className="font-bold text-[#45627d]">
+                    <span className="font-black text-[#0756a8]">Payment:</span>{" "}
+                    {paymentMethod}
+                  </p>
+                )}
                 <p className="whitespace-pre-wrap font-bold text-[#45627d]"><span className="font-black text-[#0756a8]">Notes:</span> {customerInfo.notes.trim() ? customerInfo.notes : "No additional notes"}</p>
               </div>
 
@@ -1626,20 +2015,42 @@ export default function Home() {
               </div>
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#fff4b8] p-4">
-                <span className="font-black text-[#0756a8]">Order Total</span>
-                <span className="break-words text-2xl font-black text-[#0756a8]">{formatPrice(getCartTotal())}</span>
+                <span className="font-black text-[#0756a8]">
+                  {fulfillment === "Meetup" ? "Amount Due" : "Order Total"}
+                </span>
+                <span className="break-words text-2xl font-black text-[#0756a8]">
+                  {formatPrice(getCartTotal())}
+                </span>
               </div>
+
+              {fulfillment === "Meetup" &&
+                paymentMethod === "Pay Upon Receiving" && (
+                  <div className="mt-6 rounded-2xl border-4 border-[#0756a8] bg-[#e9f4ff] p-5 text-center">
+                    <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+                      Payment Due Upon Receiving
+                    </p>
+                    <p className="mt-2 text-3xl font-black text-[#0756a8]">
+                      {formatPrice(getCartTotal())}
+                    </p>
+                    <p className="mt-2 text-sm font-bold leading-relaxed text-[#45627d]">
+                      Please prepare the exact amount when you receive your
+                      meet-up order.
+                    </p>
+                  </div>
+                )}
             </div>
 
             <div className="mx-auto mt-6 max-w-2xl space-y-3 print:hidden">
               <button type="button" onClick={downloadReceipt} className="w-full rounded-full border-4 border-[#0756a8] bg-[#0756a8] px-6 py-4 font-black text-white transition hover:bg-[#064783]">
-                Save Receipt Image
+                Save {fulfillment === "Meetup" ? "Invoice" : "Receipt"} Image
               </button>
               <p className="text-center text-sm font-semibold leading-relaxed text-[#45627d]">
-                Save the receipt image to your device, then send it to PotatoMania through our official Facebook or Instagram DM.
+                {fulfillment === "Meetup"
+                  ? "Save the invoice image to your device. It contains the amount due and order details for your meet-up."
+                  : "Save the receipt image to your device, then send it to PotatoMania through our official Facebook or Instagram DM."}
               </p>
               <button type="button" onClick={proceedToSuccess} className="w-full rounded-full border-4 border-[#0756a8] bg-white px-6 py-4 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]">
-                I’ve Saved My Receipt
+                I’ve Saved My {fulfillment === "Meetup" ? "Invoice" : "Receipt"}
               </button>
             </div>
           </div>
@@ -1651,7 +2062,7 @@ export default function Home() {
               <div className="text-sm font-black uppercase tracking-widest text-[#f28c28]">Potatomania</div>
 
               <p className="mt-5 text-sm font-black uppercase tracking-[0.25em] text-[#f28c28]">
-                Receipt Saved
+                {fulfillment === "Meetup" ? "Invoice Ready" : "Receipt Saved"}
               </p>
 
               <h1 className="mt-3 text-4xl font-black text-[#0756a8] sm:text-5xl">
@@ -1659,9 +2070,11 @@ export default function Home() {
               </h1>
 
               <p className="mx-auto mt-5 max-w-xl font-semibold leading-relaxed text-[#45627d]">
-                Your receipt is ready. Please send the saved receipt to PotatoMania
-                through our official Facebook or Instagram DM so we can
-                confirm your pre-order details.
+                {fulfillment === "Meetup"
+                  ? paymentMethod === "Pay Upon Receiving"
+                    ? "Your invoice is ready. Please save it and send it to PotatoMania through our official Facebook or Instagram DM so we can confirm your meet-up pre-order."
+                    : "Your invoice is ready. Please save it and send it to PotatoMania through our official Facebook or Instagram DM so we can confirm your meet-up pre-order."
+                  : "Your receipt is ready. Please send the saved receipt to PotatoMania through our official Facebook or Instagram DM so we can confirm your pre-order details."}
               </p>
 
               <div className="mt-7 rounded-3xl bg-[#fff4b8] p-5">
@@ -1670,13 +2083,16 @@ export default function Home() {
                 </p>
 
                 <p className="mt-2 text-xl font-black text-[#f28c28]">
-                  Awaiting DM Confirmation
+                  {fulfillment === "Meetup"
+                    ? "Awaiting DM Confirmation"
+                    : "Awaiting DM Confirmation"}
                 </p>
               </div>
 
               <p className="mt-5 text-sm font-semibold leading-relaxed text-[#45627d]">
-                Please send your receipt through our official Facebook or Instagram DM.
-                PotatoMania will confirm your order details and next steps.
+                {fulfillment === "Meetup"
+                  ? "Please send your invoice through our official Facebook or Instagram DM. PotatoMania will confirm your order details and meet-up instructions."
+                  : "Please send your receipt through our official Facebook or Instagram DM. PotatoMania will confirm your order details and next steps."}
               </p>
 
               <button
@@ -1712,9 +2128,603 @@ export default function Home() {
 
 
 
-      <footer className="mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
+      <style jsx>{`
+        .pm-shell {
+          isolation: isolate;
+        }
+
+        .pm-bg {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          pointer-events: none;
+          overflow: hidden;
+        }
+
+        .pm-bg::before,
+        .pm-bg::after {
+          content: "";
+          position: absolute;
+          border-radius: 9999px;
+          pointer-events: none;
+        }
+
+        .pm-bg::before {
+          width: 42vw;
+          height: 42vw;
+          min-width: 260px;
+          min-height: 260px;
+          left: -18vw;
+          top: 35%;
+          background: radial-gradient(circle, rgba(7, 86, 168, .08), transparent 68%);
+          animation: pmAmbient 13s ease-in-out infinite;
+        }
+
+        .pm-bg::after {
+          width: 38vw;
+          height: 38vw;
+          min-width: 240px;
+          min-height: 240px;
+          right: -14vw;
+          top: 8%;
+          background: radial-gradient(circle, rgba(242, 140, 40, .10), transparent 68%);
+          animation: pmAmbient 16s ease-in-out infinite reverse;
+        }
+
+        .pm-orb {
+          position: absolute;
+          display: block;
+          border-radius: 9999px;
+          filter: blur(2px);
+          opacity: .55;
+          animation: pmOrbFloat 12s ease-in-out infinite;
+        }
+
+        .pm-orb-blue {
+          width: 18px;
+          height: 18px;
+          left: 9%;
+          top: 24%;
+          background: rgba(7, 86, 168, .25);
+          box-shadow: 0 0 24px rgba(7, 86, 168, .18);
+        }
+
+        .pm-orb-orange {
+          width: 13px;
+          height: 13px;
+          right: 15%;
+          top: 54%;
+          background: rgba(242, 140, 40, .35);
+          box-shadow: 0 0 22px rgba(242, 140, 40, .2);
+          animation-delay: -4s;
+        }
+
+        .pm-orb-light {
+          width: 10px;
+          height: 10px;
+          left: 22%;
+          bottom: 18%;
+          background: rgba(255, 216, 74, .45);
+          box-shadow: 0 0 20px rgba(255, 216, 74, .22);
+          animation-delay: -8s;
+        }
+
+        .pm-potato {
+          position: absolute;
+          display: block;
+          font-size: 34px;
+          line-height: 1;
+          opacity: .12;
+          filter: blur(.15px);
+          transform-origin: center;
+          animation: pmPotatoFloat 11s ease-in-out infinite;
+        }
+
+        .pm-potato-one {
+          left: 4%;
+          top: 18%;
+          animation-delay: -2s;
+          transform: rotate(-12deg);
+        }
+
+        .pm-potato-two {
+          right: 5%;
+          top: 34%;
+          font-size: 27px;
+          animation-delay: -7s;
+          transform: rotate(14deg);
+        }
+
+        .pm-potato-three {
+          left: 7%;
+          bottom: 19%;
+          font-size: 25px;
+          animation-delay: -9s;
+          transform: rotate(8deg);
+        }
+
+        .pm-potato-four {
+          right: 11%;
+          bottom: 10%;
+          font-size: 31px;
+          animation-delay: -5s;
+          transform: rotate(-15deg);
+        }
+
+        .pm-cheese {
+          position: absolute;
+          width: 96px;
+          height: 34px;
+          border-radius: 0 0 24px 24px;
+          background: linear-gradient(180deg, #ffe06a 0%, #f5b91b 100%);
+          opacity: .24;
+          filter: blur(.15px) drop-shadow(0 8px 12px rgba(242, 140, 40, .12));
+          animation: pmCheeseFloat 10s ease-in-out infinite;
+        }
+
+        .pm-cheese::before {
+          content: "";
+          position: absolute;
+          left: 8px;
+          right: 8px;
+          top: -7px;
+          height: 14px;
+          border-radius: 50%;
+          background: #ffe06a;
+        }
+
+        .pm-cheese i {
+          position: absolute;
+          display: block;
+          bottom: -20px;
+          width: 13px;
+          border-radius: 0 0 12px 12px;
+          background: linear-gradient(180deg, #ffd84a 0%, #f5b91b 100%);
+          transform-origin: top center;
+          animation: pmDrip 4.5s ease-in-out infinite;
+        }
+
+        .pm-cheese i:nth-child(1) { left: 16px; height: 22px; animation-delay: -.8s; }
+        .pm-cheese i:nth-child(2) { left: 43px; width: 16px; height: 38px; animation-delay: -2.1s; }
+        .pm-cheese i:nth-child(3) { right: 14px; width: 11px; height: 19px; animation-delay: -3.2s; }
+
+        .pm-cheese-one { left: 2%; top: 31%; transform: rotate(-7deg); animation-delay: -2s; }
+        .pm-cheese-two { right: 2%; top: 67%; width: 78px; height: 28px; transform: rotate(8deg) scale(.86); animation-delay: -6s; }
+        .pm-cheese-three { right: 9%; top: 13%; width: 64px; height: 25px; transform: rotate(-5deg) scale(.74); animation-delay: -9s; }
+        .pm-cheese-four { left: 12%; bottom: 8%; width: 70px; height: 26px; transform: rotate(5deg) scale(.78); animation-delay: -4s; }
+
+        .pm-spark {
+          position: absolute;
+          display: block;
+          color: #f28c28;
+          font-size: 20px;
+          opacity: .28;
+          text-shadow: 0 0 14px rgba(242, 140, 40, .24);
+          animation: pmSpark 3.8s ease-in-out infinite;
+        }
+
+        .pm-spark-one { left: 13%; top: 12%; }
+        .pm-spark-two { right: 18%; top: 23%; font-size: 15px; animation-delay: -1.2s; }
+        .pm-spark-three { left: 18%; bottom: 13%; font-size: 14px; animation-delay: -2.4s; }
+        .pm-spark-four { right: 8%; bottom: 22%; font-size: 19px; animation-delay: -3s; }
+
+        .pm-header {
+          background: rgba(255, 255, 255, .78) !important;
+          -webkit-backdrop-filter: blur(18px);
+          backdrop-filter: blur(18px);
+          box-shadow: 0 8px 30px rgba(18, 48, 79, .08);
+        }
+
+        .pm-progress {
+          animation: pmProgressPulse 2.8s ease-in-out infinite;
+        }
+
+        .pm-content > div {
+          animation: pmSectionIn .55s cubic-bezier(.2, .75, .25, 1) both;
+        }
+
+        .pm-content button {
+          position: relative;
+          overflow: hidden;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .pm-content button::after {
+          content: "";
+          position: absolute;
+          top: -60%;
+          left: -70%;
+          width: 38%;
+          height: 220%;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,.48), transparent);
+          transform: rotate(20deg);
+          transition: left .65s ease;
+          pointer-events: none;
+        }
+
+        .pm-content button:hover::after {
+          left: 135%;
+        }
+
+        .pm-content button:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 12px 26px rgba(7, 86, 168, .13);
+        }
+
+        .pm-content button:active {
+          transform: translateY(1px) scale(.985);
+          transition-duration: .08s;
+        }
+
+        .pm-content img {
+          transition: transform .45s cubic-bezier(.2, .75, .25, 1), filter .45s ease;
+        }
+
+        .pm-content img:hover {
+          transform: scale(1.045) rotate(-1.5deg);
+          filter: drop-shadow(0 10px 16px rgba(18, 48, 79, .12));
+        }
+
+        .pm-content input,
+        .pm-content textarea {
+          transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease, background-color .25s ease;
+        }
+
+        .pm-content input:focus,
+        .pm-content textarea:focus {
+          border-color: #0756a8 !important;
+          background-color: #ffffff;
+          box-shadow: 0 0 0 4px rgba(7, 86, 168, .10), 0 8px 20px rgba(7, 86, 168, .08);
+          transform: translateY(-1px);
+        }
+
+        .pm-content [class*="shadow-["] {
+          transition: transform .3s ease, box-shadow .3s ease, background-color .3s ease;
+        }
+
+        .pm-content [class*="shadow-["]:hover {
+          transform: translateY(-3px);
+        }
+
+        .pm-content .grid > button:nth-child(1),
+        .pm-content .space-y-5 > div:nth-child(1) { animation-delay: .04s; }
+        .pm-content .grid > button:nth-child(2),
+        .pm-content .space-y-5 > div:nth-child(2) { animation-delay: .10s; }
+        .pm-content .grid > button:nth-child(3),
+        .pm-content .space-y-5 > div:nth-child(3) { animation-delay: .16s; }
+        .pm-content .grid > button:nth-child(4),
+        .pm-content .space-y-5 > div:nth-child(4) { animation-delay: .22s; }
+        .pm-content .grid > button:nth-child(5),
+        .pm-content .space-y-5 > div:nth-child(5) { animation-delay: .28s; }
+        .pm-content .grid > button:nth-child(6),
+        .pm-content .space-y-5 > div:nth-child(6) { animation-delay: .34s; }
+        .pm-content .grid > button:nth-child(7),
+        .pm-content .space-y-5 > div:nth-child(7) { animation-delay: .40s; }
+        .pm-content .grid > button:nth-child(8),
+        .pm-content .space-y-5 > div:nth-child(8) { animation-delay: .46s; }
+        .pm-content .grid > button:nth-child(9),
+        .pm-content .space-y-5 > div:nth-child(9) { animation-delay: .52s; }
+
+        .pm-footer {
+          background: rgba(255, 255, 255, .88) !important;
+          -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(12px);
+        }
+
+        @keyframes pmSectionIn {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pmAmbient {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+          50% { transform: translate3d(24px, -18px, 0) scale(1.06); }
+        }
+
+        @keyframes pmOrbFloat {
+          0%, 100% { transform: translate3d(0, 0, 0); }
+          50% { transform: translate3d(18px, -24px, 0); }
+        }
+
+        @keyframes pmPotatoFloat {
+          0%, 100% { margin-top: 0; }
+          50% { margin-top: -16px; }
+        }
+
+        @keyframes pmCheeseFloat {
+          0%, 100% { margin-top: 0; }
+          50% { margin-top: -18px; }
+        }
+
+        @keyframes pmDrip {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(1.12); }
+        }
+
+        @keyframes pmSpark {
+          0%, 100% { opacity: .18; transform: translateY(4px) scale(.8) rotate(0deg); }
+          50% { opacity: .5; transform: translateY(-7px) scale(1.1) rotate(18deg); }
+        }
+
+        @keyframes pmProgressPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(7, 86, 168, 0); }
+          50% { box-shadow: 0 0 0 5px rgba(7, 86, 168, .08); }
+        }
+
+        .pm-drive-transition {
+          isolation: isolate;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          animation: pmDriveFadeIn .12s ease-out both;
+        }
+
+        .pm-drive-sky {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at 50% 38%, rgba(255,255,255,.98) 0 12%, transparent 44%),
+            linear-gradient(180deg, #fff8dc 0%, #f7fbff 48%, #dbeeff 100%);
+          z-index: -5;
+        }
+
+        .pm-drive-glow {
+          position: absolute;
+          width: 42vw;
+          height: 42vw;
+          max-width: 520px;
+          max-height: 520px;
+          border-radius: 999px;
+          filter: blur(35px);
+          opacity: .38;
+          animation: pmDriveGlow 1.55s ease-in-out both;
+          z-index: -4;
+        }
+
+        .pm-drive-glow-one {
+          left: -8vw;
+          top: 5vh;
+          background: rgba(242,140,40,.28);
+        }
+
+        .pm-drive-glow-two {
+          right: -10vw;
+          bottom: -8vh;
+          background: rgba(7,86,168,.22);
+          animation-delay: -.2s;
+        }
+
+        .pm-drive-road {
+          position: absolute;
+          left: -10%;
+          right: -10%;
+          bottom: -23%;
+          height: 48%;
+          transform: perspective(500px) rotateX(62deg);
+          transform-origin: bottom;
+          background: linear-gradient(180deg, rgba(7,86,168,.06), rgba(18,48,79,.16));
+          border-top: 5px solid rgba(7,86,168,.12);
+          z-index: -2;
+        }
+
+        .pm-drive-speed {
+          position: absolute;
+          height: 5px;
+          border-radius: 999px;
+          background: linear-gradient(90deg, transparent, rgba(7,86,168,.22), #f28c28);
+          transform: translateX(-120vw) rotate(-8deg);
+          animation: pmDriveSpeed .7s linear infinite;
+          z-index: -1;
+        }
+
+        .pm-drive-speed-one { top: 16%; width: 31vw; animation-delay: -.08s; }
+        .pm-drive-speed-two { top: 27%; width: 22vw; animation-delay: -.22s; }
+        .pm-drive-speed-three { top: 39%; width: 38vw; animation-delay: -.36s; }
+        .pm-drive-speed-four { top: 52%; width: 27vw; animation-delay: -.48s; }
+        .pm-drive-speed-five { top: 66%; width: 45vw; animation-delay: -.60s; }
+        .pm-drive-speed-six { top: 78%; width: 34vw; animation-delay: -.34s; }
+
+        .pm-drive-dust {
+          position: absolute;
+          width: 110px;
+          height: 52px;
+          border-radius: 50%;
+          background: rgba(255,255,255,.78);
+          filter: blur(6px);
+          opacity: 0;
+          animation: pmDriveDust .85s ease-out both;
+          z-index: 1;
+        }
+
+        .pm-drive-dust-one { bottom: 29%; left: 7%; animation-delay: .28s; }
+        .pm-drive-dust-two { bottom: 24%; left: 14%; animation-delay: .40s; transform: scale(.72); }
+        .pm-drive-dust-three { bottom: 32%; left: 21%; animation-delay: .50s; transform: scale(.55); }
+        .pm-drive-dust-four { bottom: 27%; left: 29%; animation-delay: .58s; transform: scale(.40); }
+
+        .pm-drive-potatoes {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+          pointer-events: none;
+          z-index: 3;
+        }
+
+        .pm-drive-potato {
+          position: absolute;
+          top: -12vh;
+          display: block;
+          font-size: clamp(24px, 3.2vw, 48px);
+          line-height: 1;
+          opacity: 0;
+          filter: drop-shadow(0 7px 7px rgba(18,48,79,.16));
+          will-change: transform, opacity;
+          animation: pmDrivePotatoFall 1.5s cubic-bezier(.2,.72,.18,1) both;
+        }
+
+        .pm-drive-potato-01 { left: 4%;  animation-delay: .02s; --potato-x: 13vw; --potato-r: 310deg; }
+        .pm-drive-potato-02 { left: 11%; animation-delay: .16s; --potato-x: -8vw; --potato-r: 220deg; font-size: 28px; }
+        .pm-drive-potato-03 { left: 18%; animation-delay: .30s; --potato-x: 18vw; --potato-r: 390deg; font-size: 42px; }
+        .pm-drive-potato-04 { left: 26%; animation-delay: .07s; --potato-x: -13vw; --potato-r: 250deg; font-size: 32px; }
+        .pm-drive-potato-05 { left: 34%; animation-delay: .24s; --potato-x: 10vw; --potato-r: 340deg; }
+        .pm-drive-potato-06 { left: 42%; animation-delay: .38s; --potato-x: -16vw; --potato-r: 280deg; font-size: 29px; }
+        .pm-drive-potato-07 { left: 50%; animation-delay: .10s; --potato-x: 15vw; --potato-r: 430deg; font-size: 40px; }
+        .pm-drive-potato-08 { left: 58%; animation-delay: .27s; --potato-x: -11vw; --potato-r: 330deg; font-size: 31px; }
+        .pm-drive-potato-09 { left: 65%; animation-delay: .04s; --potato-x: 14vw; --potato-r: 290deg; }
+        .pm-drive-potato-10 { left: 72%; animation-delay: .20s; --potato-x: -17vw; --potato-r: 410deg; font-size: 35px; }
+        .pm-drive-potato-11 { left: 79%; animation-delay: .34s; --potato-x: 9vw; --potato-r: 360deg; font-size: 27px; }
+        .pm-drive-potato-12 { left: 86%; animation-delay: .12s; --potato-x: -12vw; --potato-r: 235deg; font-size: 44px; }
+        .pm-drive-potato-13 { left: 93%; animation-delay: .31s; --potato-x: 8vw; --potato-r: 385deg; font-size: 30px; }
+        .pm-drive-potato-14 { left: 7%;  animation-delay: .48s; --potato-x: 23vw; --potato-r: 500deg; font-size: 26px; }
+        .pm-drive-potato-15 { left: 55%; animation-delay: .52s; --potato-x: -20vw; --potato-r: 460deg; font-size: 25px; }
+        .pm-drive-potato-16 { left: 88%; animation-delay: .43s; --potato-x: 16vw; --potato-r: 520deg; font-size: 33px; }
+
+        .pm-drive-vehicle {
+          position: absolute;
+          width: min(92vw, 1200px);
+          max-height: 84vh;
+          object-fit: contain;
+          left: 50%;
+          top: 52%;
+          transform: translate(-175vw, -50%) rotate(-2deg) scale(.68);
+          filter: drop-shadow(0 22px 22px rgba(18,48,79,.22));
+          animation: pmDriveVehicle 1.45s linear both;
+          z-index: 2;
+          pointer-events: none;
+          user-select: none;
+          will-change: transform, filter;
+        }
+
+        @keyframes pmDriveFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes pmDriveVehicle {
+          /* One uninterrupted pass: the tricycle never stops or lingers in the middle. */
+          0% {
+            transform: translate(-175vw, -50%) rotate(-2deg) scale(.68);
+            filter: blur(0) drop-shadow(0 18px 20px rgba(18,48,79,.12));
+          }
+
+          25% {
+            transform: translate(-88vw, -50%) rotate(-1deg) scale(.78);
+            filter: blur(.15px) drop-shadow(0 21px 22px rgba(18,48,79,.16));
+          }
+
+          50% {
+            transform: translate(0vw, -50%) rotate(0deg) scale(.96);
+            filter: blur(.35px) drop-shadow(0 24px 24px rgba(18,48,79,.19));
+          }
+
+          75% {
+            transform: translate(88vw, -50%) rotate(1deg) scale(1.10);
+            filter: blur(1px) drop-shadow(0 27px 27px rgba(18,48,79,.21));
+          }
+
+          100% {
+            transform: translate(175vw, -50%) rotate(2deg) scale(1.28);
+            filter: blur(2.5px) drop-shadow(0 30px 30px rgba(18,48,79,.18));
+          }
+        }
+
+        @keyframes pmDrivePotatoFall {
+          0% {
+            opacity: 0;
+            transform: translate3d(0, -14vh, 0) rotate(0deg) scale(.45);
+          }
+
+          12% {
+            opacity: .98;
+          }
+
+          42% {
+            opacity: 1;
+          }
+
+          78% {
+            opacity: .92;
+          }
+
+          100% {
+            opacity: 0;
+            transform: translate3d(var(--potato-x), 116vh, 0) rotate(var(--potato-r)) scale(1);
+          }
+        }
+
+        @keyframes pmDriveSpeed {
+          from {
+            transform: translateX(-120vw) rotate(-8deg);
+            opacity: 0;
+          }
+
+          12% {
+            opacity: .9;
+          }
+
+          to {
+            transform: translateX(130vw) rotate(-8deg);
+            opacity: 0;
+          }
+        }
+
+        @keyframes pmDriveDust {
+          0% {
+            opacity: 0;
+            transform: translate(0, 8px) scale(.25);
+          }
+
+          25% {
+            opacity: .7;
+          }
+
+          100% {
+            opacity: 0;
+            transform: translate(-80px, -18px) scale(1.45);
+          }
+        }
+
+        @keyframes pmDriveGlow {
+          0% { opacity: .18; transform: scale(.72); }
+          45% { opacity: .42; transform: scale(1); }
+          100% { opacity: .08; transform: scale(1.25); }
+        }
+
+        @media (max-width: 640px) {
+          .pm-potato { font-size: 25px; opacity: .09; }
+          .pm-cheese { opacity: .18; transform: scale(.78); }
+          .pm-spark { font-size: 15px; }
+          .pm-orb { opacity: .35; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pm-bg *,
+          .pm-bg::before,
+          .pm-bg::after,
+          .pm-progress,
+          .pm-content > div,
+          .pm-drive-transition *,
+          .pm-drive-transition {
+            animation: none !important;
+          }
+
+          .pm-content button,
+          .pm-content img,
+          .pm-content input,
+          .pm-content textarea,
+          .pm-content [class*="shadow-["] {
+            transition: none !important;
+          }
+
+          .pm-content button::after {
+            display: none;
+          }
+        }
+      `}</style>
+
+
+      <footer className="pm-footer relative z-10 mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
         <p className="font-black text-[#0756a8]">
-          PotatoMania
+          Potatomania
         </p>
 
         <p className="mt-1 text-sm font-semibold text-[#45627d]">
@@ -1723,4 +2733,4 @@ export default function Home() {
       </footer>
     </main>
   );
-}
+} 
