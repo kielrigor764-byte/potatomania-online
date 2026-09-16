@@ -320,36 +320,48 @@ export default function Home() {
     setScreen("items");
   }
 
-  function scrollProductCardToTop(productId: string) {
-    const card = productCardRefs.current[productId];
+  function centerProductCard(productId: string) {
+    const center = () => {
+      const card = productCardRefs.current[productId];
 
-    if (!card) {
+      if (!card) {
+        return;
+      }
+
+      // scrollIntoView with block:center reliably places the actual card
+      // in the middle of the viewport on both desktop and mobile.
+      card.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+    };
+
+    // Run immediately, then again after React finishes rendering.
+    center();
+    window.requestAnimationFrame(center);
+    window.setTimeout(center, 250);
+  }
+
+  useEffect(() => {
+    if (screen !== "items" || !selectedProduct) {
       return;
     }
 
-    // The important part is that this runs BEFORE the browser can focus the
-    // clicked button. The browser can otherwise undo a programmatic scroll.
-    const rect = card.getBoundingClientRect();
-    const pageTop = rect.top + window.pageYOffset;
-
-    // Put the clicked card near the top of the visible page so the user can
-    // immediately see which card they clicked.
-    const target = Math.max(0, pageTop - 32);
-
-    window.scrollTo(0, target);
-  }
+    // Wait until the selected card and customization overlay have rendered,
+    // then place the selected menu card in the visual center of the screen.
+    centerProductCard(selectedProduct.id);
+  }, [screen, selectedProduct]);
 
   function openProduct(product: Product) {
-    const productId = product.id;
+    // Move the clicked menu card to the center immediately so the user
+    // never has to manually scroll back to find the selected item.
+    centerProductCard(product.id);
+    setSelectedProduct(product);
+    setSelectedToppings([]);
 
-    scrollProductCardToTop(productId);
-
-    // Give the page one paint to visibly move to the card before opening the
-    // customization panel.
-    window.setTimeout(() => {
-      setSelectedProduct(product);
-      setSelectedToppings([]);
-    }, 220);
+    // Re-center after the selection/modal state has rendered as well.
+    window.requestAnimationFrame(() => centerProductCard(product.id));
   }
 
   function toggleTopping(topping: AddOn) {
@@ -393,9 +405,7 @@ export default function Home() {
     const productId = selectedProduct.id;
     setSelectedProduct(null);
     setSelectedToppings([]);
-    window.requestAnimationFrame(() => {
-      scrollProductCardToTop(productId);
-    });
+    centerProductCard(productId);
   }
 
   function increaseQuantity(itemId: string) {
@@ -801,7 +811,7 @@ export default function Home() {
   }
 
   return (
-    <main className="pm-shell relative min-h-screen overflow-x-clip bg-[#f8fbff] pb-32 text-[#12304f]">
+    <main className="pm-shell relative min-h-screen overflow-x-hidden bg-[#f8fbff] pb-32 text-[#12304f]">
       <div className="pm-bg" aria-hidden="true">
         <span className="pm-orb pm-orb-blue" />
         <span className="pm-orb pm-orb-orange" />
@@ -1095,11 +1105,6 @@ export default function Home() {
                 <button
                   key={`product-${product.id}`}
                   type="button"
-                  onPointerDown={(event) => {
-                    // Prevent the browser's default button-focus scrolling.
-                    event.preventDefault();
-                    scrollProductCardToTop(product.id);
-                  }}
                   onClick={() => openProduct(product)}
                   ref={(element) => {
                     productCardRefs.current[product.id] = element;
@@ -1182,11 +1187,7 @@ export default function Home() {
                         const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
-                        if (productId) {
-                          window.requestAnimationFrame(() => {
-                            scrollProductCardToTop(productId);
-                          });
-                        }
+                        if (productId) centerProductCard(productId);
                       }}
                       className="rounded-full bg-[#e9f4ff] px-4 py-2 font-black text-[#0756a8] hover:bg-[#d8ebff]"
                     >
@@ -1253,11 +1254,7 @@ export default function Home() {
                         const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
-                        if (productId) {
-                          window.requestAnimationFrame(() => {
-                            scrollProductCardToTop(productId);
-                          });
-                        }
+                        if (productId) centerProductCard(productId);
                       }}
                       className="rounded-full border-4 border-[#0756a8] px-6 py-3 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]"
                     >
