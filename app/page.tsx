@@ -320,48 +320,109 @@ export default function Home() {
     setScreen("items");
   }
 
-  function centerProductCard(productId: string) {
-    const center = () => {
-      const card = productCardRefs.current[productId];
+  function getScrollParent(element: HTMLElement): HTMLElement | null {
+    let parent = element.parentElement;
 
-      if (!card) {
-        return;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      const canScrollY =
+        /(auto|scroll|overlay)/.test(style.overflowY) &&
+        parent.scrollHeight > parent.clientHeight;
+
+      if (canScrollY) {
+        return parent;
       }
 
-      // scrollIntoView with block:center reliably places the actual card
-      // in the middle of the viewport on both desktop and mobile.
-      card.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "nearest",
-      });
-    };
+      parent = parent.parentElement;
+    }
 
-    // Run immediately, then again after React finishes rendering.
-    center();
-    window.requestAnimationFrame(center);
-    window.setTimeout(center, 250);
+    return null;
   }
 
-  useEffect(() => {
-    if (screen !== "items" || !selectedProduct) {
+  function centerProductCard(productId: string, smooth = true) {
+    const card = productCardRefs.current[productId];
+
+    if (!card) {
       return;
     }
 
-    // Wait until the selected card and customization overlay have rendered,
-    // then place the selected menu card in the visual center of the screen.
-    centerProductCard(selectedProduct.id);
-  }, [screen, selectedProduct]);
+    // Find the actual element that is scrolling. This handles both the
+    // normal browser page and any scrollable wrapper around the menu.
+    const scrollParent = getScrollParent(card);
+    const header = document.querySelector("header");
+    const headerHeight =
+      header instanceof HTMLElement
+        ? header.getBoundingClientRect().height
+        : 0;
+
+    if (scrollParent) {
+      const cardRect = card.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+
+      const cardCenter = cardRect.top + cardRect.height / 2;
+      const visibleCenter =
+        parentRect.top +
+        Math.max(headerHeight, 0) +
+        (parentRect.height - Math.max(headerHeight, 0)) / 2;
+
+      const distance = cardCenter - visibleCenter;
+
+      scrollParent.scrollTo({
+        top: Math.max(
+          0,
+          Math.min(
+            scrollParent.scrollHeight - scrollParent.clientHeight,
+            scrollParent.scrollTop + distance,
+          ),
+        ),
+        behavior: smooth ? "smooth" : "auto",
+      });
+
+      return;
+    }
+
+    // The browser document is the scroll surface.
+    const cardRect = card.getBoundingClientRect();
+    const visibleCenter =
+      headerHeight + (window.innerHeight - headerHeight) / 2;
+    const cardCenter = cardRect.top + cardRect.height / 2;
+    const targetY = window.scrollY + cardCenter - visibleCenter;
+    const maxScroll =
+      document.documentElement.scrollHeight - window.innerHeight;
+
+    window.scrollTo({
+      top: Math.max(0, Math.min(maxScroll, targetY)),
+      behavior: smooth ? "smooth" : "auto",
+    });
+  }
 
   function openProduct(product: Product) {
-    // Move the clicked menu card to the center immediately so the user
-    // never has to manually scroll back to find the selected item.
-    centerProductCard(product.id);
-    setSelectedProduct(product);
-    setSelectedToppings([]);
+    const productId = product.id;
 
-    // Re-center after the selection/modal state has rendered as well.
-    window.requestAnimationFrame(() => centerProductCard(product.id));
+    // Stop the browser from doing its own focus-scroll first.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    // First move the actual page so the clicked card is physically in the
+    // middle of the user's screen.
+    centerProductCard(productId, false);
+
+    // Open the customization panel just after the scroll command. This keeps
+    // the card-positioning action from being swallowed by the click/modal
+    // state update.
+    window.setTimeout(() => {
+      setSelectedProduct(product);
+      setSelectedToppings([]);
+    }, 80);
+
+    // Run it again after the browser has painted, in case the click itself or
+    // a responsive layout change adjusted the page position.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        centerProductCard(productId, true);
+      });
+    });
   }
 
   function toggleTopping(topping: AddOn) {
@@ -811,7 +872,7 @@ export default function Home() {
   }
 
   return (
-    <main className="pm-shell relative min-h-screen overflow-x-hidden bg-[#f8fbff] pb-32 text-[#12304f]">
+    <main className="pm-shell relative min-h-screen overflow-x-clip bg-[#f8fbff] pb-32 text-[#12304f]">
       <div className="pm-bg" aria-hidden="true">
         <span className="pm-orb pm-orb-blue" />
         <span className="pm-orb pm-orb-orange" />
@@ -1168,7 +1229,7 @@ export default function Home() {
             </div>
 
             {selectedProduct && (
-              <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#12304f]/60 p-4 sm:items-center">
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-transparent p-4 sm:items-center">
                 <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 shadow-[8px_8px_0_#f28c28] sm:p-8">
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -1541,7 +1602,7 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "We will arrange a rider and you can for pickup and delivery."}
+                      : "You will need to book a rider separately for pickup and delivery."}
                   </p>
                 </div>
 
@@ -1665,7 +1726,7 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "We will arrange a rider and you can pay them directly upon arrival."}
+                      : "You will need to book a rider separately for pickup and delivery."}
                   </p>
                 </div>
 
@@ -2724,7 +2785,7 @@ export default function Home() {
 
       <footer className="pm-footer relative z-10 mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
         <p className="font-black text-[#0756a8]">
-          Potatomania
+          PotatoMania
         </p>
 
         <p className="mt-1 text-sm font-semibold text-[#45627d]">
