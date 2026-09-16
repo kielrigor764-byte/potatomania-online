@@ -87,7 +87,7 @@ const products: Product[] = [
     category: "spuds",
     description:
       "Select how you like your Spuds.",
-    price: 45,
+    price: 105,
     image: "/spuds/supreme-spud.png",
   },
   {
@@ -633,13 +633,36 @@ export default function Home() {
       }
 
       const imageUrl = URL.createObjectURL(blob);
+      const isMobileDevice = /Android|iPhone|iPad|iPod|Windows Phone/i.test(
+        navigator.userAgent,
+      );
+
+      if (isMobileDevice) {
+        // Many mobile browsers ignore the download attribute for blob URLs.
+        // Opening the image lets the customer long-press it and save it.
+        const imageWindow = window.open(imageUrl, "_blank");
+
+        if (!imageWindow) {
+          alert(
+            "Your browser blocked the receipt image window. Please allow pop-ups for this site and try again.",
+          );
+        } else {
+          alert(
+            "Your receipt image is open in a new tab. Press and hold the image, then choose Save Image or Download Image.",
+          );
+        }
+
+        window.setTimeout(() => URL.revokeObjectURL(imageUrl), 60_000);
+        return;
+      }
+
       const downloadLink = document.createElement("a");
       downloadLink.href = imageUrl;
       downloadLink.download = fileName;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       downloadLink.remove();
-      window.setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
+      window.setTimeout(() => URL.revokeObjectURL(imageUrl), 60_000);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -1012,7 +1035,7 @@ export default function Home() {
 
                             return (
                               <button
-                                key={`topping-${topping}`}
+                                key={`topping-${topping.id}`}
                                 type="button"
                                 onClick={() =>
                                   toggleTopping(topping)
