@@ -320,109 +320,36 @@ export default function Home() {
     setScreen("items");
   }
 
-  function getScrollParent(element: HTMLElement): HTMLElement | null {
-    let parent = element.parentElement;
-
-    while (parent) {
-      const style = window.getComputedStyle(parent);
-      const canScrollY =
-        /(auto|scroll|overlay)/.test(style.overflowY) &&
-        parent.scrollHeight > parent.clientHeight;
-
-      if (canScrollY) {
-        return parent;
-      }
-
-      parent = parent.parentElement;
-    }
-
-    return null;
-  }
-
-  function centerProductCard(productId: string, smooth = true) {
+  function scrollProductCardToTop(productId: string) {
     const card = productCardRefs.current[productId];
 
     if (!card) {
       return;
     }
 
-    // Find the actual element that is scrolling. This handles both the
-    // normal browser page and any scrollable wrapper around the menu.
-    const scrollParent = getScrollParent(card);
-    const header = document.querySelector("header");
-    const headerHeight =
-      header instanceof HTMLElement
-        ? header.getBoundingClientRect().height
-        : 0;
+    // The important part is that this runs BEFORE the browser can focus the
+    // clicked button. The browser can otherwise undo a programmatic scroll.
+    const rect = card.getBoundingClientRect();
+    const pageTop = rect.top + window.pageYOffset;
 
-    if (scrollParent) {
-      const cardRect = card.getBoundingClientRect();
-      const parentRect = scrollParent.getBoundingClientRect();
+    // Put the clicked card near the top of the visible page so the user can
+    // immediately see which card they clicked.
+    const target = Math.max(0, pageTop - 32);
 
-      const cardCenter = cardRect.top + cardRect.height / 2;
-      const visibleCenter =
-        parentRect.top +
-        Math.max(headerHeight, 0) +
-        (parentRect.height - Math.max(headerHeight, 0)) / 2;
-
-      const distance = cardCenter - visibleCenter;
-
-      scrollParent.scrollTo({
-        top: Math.max(
-          0,
-          Math.min(
-            scrollParent.scrollHeight - scrollParent.clientHeight,
-            scrollParent.scrollTop + distance,
-          ),
-        ),
-        behavior: smooth ? "smooth" : "auto",
-      });
-
-      return;
-    }
-
-    // The browser document is the scroll surface.
-    const cardRect = card.getBoundingClientRect();
-    const visibleCenter =
-      headerHeight + (window.innerHeight - headerHeight) / 2;
-    const cardCenter = cardRect.top + cardRect.height / 2;
-    const targetY = window.scrollY + cardCenter - visibleCenter;
-    const maxScroll =
-      document.documentElement.scrollHeight - window.innerHeight;
-
-    window.scrollTo({
-      top: Math.max(0, Math.min(maxScroll, targetY)),
-      behavior: smooth ? "smooth" : "auto",
-    });
+    window.scrollTo(0, target);
   }
 
   function openProduct(product: Product) {
     const productId = product.id;
 
-    // Stop the browser from doing its own focus-scroll first.
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
+    scrollProductCardToTop(productId);
 
-    // First move the actual page so the clicked card is physically in the
-    // middle of the user's screen.
-    centerProductCard(productId, false);
-
-    // Open the customization panel just after the scroll command. This keeps
-    // the card-positioning action from being swallowed by the click/modal
-    // state update.
+    // Give the page one paint to visibly move to the card before opening the
+    // customization panel.
     window.setTimeout(() => {
       setSelectedProduct(product);
       setSelectedToppings([]);
-    }, 80);
-
-    // Run it again after the browser has painted, in case the click itself or
-    // a responsive layout change adjusted the page position.
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        centerProductCard(productId, true);
-      });
-    });
+    }, 220);
   }
 
   function toggleTopping(topping: AddOn) {
@@ -466,7 +393,9 @@ export default function Home() {
     const productId = selectedProduct.id;
     setSelectedProduct(null);
     setSelectedToppings([]);
-    centerProductCard(productId);
+    window.requestAnimationFrame(() => {
+      scrollProductCardToTop(productId);
+    });
   }
 
   function increaseQuantity(itemId: string) {
@@ -1166,6 +1095,11 @@ export default function Home() {
                 <button
                   key={`product-${product.id}`}
                   type="button"
+                  onPointerDown={(event) => {
+                    // Prevent the browser's default button-focus scrolling.
+                    event.preventDefault();
+                    scrollProductCardToTop(product.id);
+                  }}
                   onClick={() => openProduct(product)}
                   ref={(element) => {
                     productCardRefs.current[product.id] = element;
@@ -1248,7 +1182,11 @@ export default function Home() {
                         const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
-                        if (productId) centerProductCard(productId);
+                        if (productId) {
+                          window.requestAnimationFrame(() => {
+                            scrollProductCardToTop(productId);
+                          });
+                        }
                       }}
                       className="rounded-full bg-[#e9f4ff] px-4 py-2 font-black text-[#0756a8] hover:bg-[#d8ebff]"
                     >
@@ -1315,7 +1253,11 @@ export default function Home() {
                         const productId = selectedProduct?.id;
                         setSelectedProduct(null);
                         setSelectedToppings([]);
-                        if (productId) centerProductCard(productId);
+                        if (productId) {
+                          window.requestAnimationFrame(() => {
+                            scrollProductCardToTop(productId);
+                          });
+                        }
                       }}
                       className="rounded-full border-4 border-[#0756a8] px-6 py-3 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]"
                     >
@@ -2785,7 +2727,7 @@ export default function Home() {
 
       <footer className="pm-footer relative z-10 mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
         <p className="font-black text-[#0756a8]">
-          PotatoMania
+          Potatomania
         </p>
 
         <p className="mt-1 text-sm font-semibold text-[#45627d]">
