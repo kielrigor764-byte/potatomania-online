@@ -20,6 +20,7 @@ type Category = {
   id: string;
   name: string;
   description: string;
+  image: string;
 };
 
 type AddOn = {
@@ -45,6 +46,7 @@ type CartItem = {
   price: number;
   quantity: number;
   toppings: AddOn[];
+  tornadoFlavor?: "Cheese" | "Sourcream" | "BBQ";
 };
 
 type CustomerInfo = {
@@ -59,24 +61,28 @@ const categories: Category[] = [
     name: "Spuds",
     description:
       "Build your own or choose from our delicious potato creations.",
+    image: "/category/spuds.png",
   },
   {
     id: "tornado",
     name: "Tornado Potato",
     description:
       "Crispy spiral potatoes with your choice of flavor.",
+    image: "/category/tornado-potato.png",
   },
   {
     id: "iced-tea",
     name: "Iced Tea",
     description:
       "A refreshing drink to pair with your favorite snack.",
+    image: "/category/iced-tea-refresher.png",
   },
   {
     id: "combo",
     name: "Combo Meals",
     description:
       "Delicious Potatomania favorites paired with iced tea.",
+    image: "/category/combo-meals.png",
   },
 ];
 
@@ -158,7 +164,7 @@ const products: Product[] = [
     name: "Bacon Garlic",
     category: "spuds",
     description:
-      "Bacon bits, white onion, lettuce, and garlic mayo.",
+      "Bacon bits, white onion, carrots, and garlic mayo.",
     price: 140,
     image: "/spuds/bacon-garlic.png",
   },
@@ -248,10 +254,11 @@ export default function Home() {
   const [selectedProduct, setSelectedProduct] =
     useState<Product | null>(null);
 
-  const productCardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-
   const [selectedToppings, setSelectedToppings] =
     useState<AddOn[]>([]);
+
+  const [selectedTornadoFlavor, setSelectedTornadoFlavor] =
+    useState<"Cheese" | "Sourcream" | "BBQ" | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
 
@@ -317,51 +324,14 @@ export default function Home() {
     setSelectedCategory(categoryId);
     setSelectedProduct(null);
     setSelectedToppings([]);
+    setSelectedTornadoFlavor(null);
     setScreen("items");
   }
 
-  function centerProductCard(productId: string) {
-    const center = () => {
-      const card = productCardRefs.current[productId];
-
-      if (!card) {
-        return;
-      }
-
-      // scrollIntoView with block:center reliably places the actual card
-      // in the middle of the viewport on both desktop and mobile.
-      card.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "nearest",
-      });
-    };
-
-    // Run immediately, then again after React finishes rendering.
-    center();
-    window.requestAnimationFrame(center);
-    window.setTimeout(center, 250);
-  }
-
-  useEffect(() => {
-    if (screen !== "items" || !selectedProduct) {
-      return;
-    }
-
-    // Wait until the selected card and customization overlay have rendered,
-    // then place the selected menu card in the visual center of the screen.
-    centerProductCard(selectedProduct.id);
-  }, [screen, selectedProduct]);
-
   function openProduct(product: Product) {
-    // Move the clicked menu card to the center immediately so the user
-    // never has to manually scroll back to find the selected item.
-    centerProductCard(product.id);
     setSelectedProduct(product);
     setSelectedToppings([]);
-
-    // Re-center after the selection/modal state has rendered as well.
-    window.requestAnimationFrame(() => centerProductCard(product.id));
+    setSelectedTornadoFlavor(null);
   }
 
   function toggleTopping(topping: AddOn) {
@@ -385,16 +355,28 @@ export default function Home() {
       return;
     }
 
+    const isComboTwo = selectedProduct.id === "combo-2";
+
+    if (isComboTwo && !selectedTornadoFlavor) {
+      alert("Please choose a Tornado Potato flavor first.");
+      return;
+    }
+
     const addOnTotal = selectedToppings.reduce((total, topping) => total + topping.price, 0);
+    const itemName =
+      isComboTwo && selectedTornadoFlavor
+        ? `${selectedProduct.name} (${selectedTornadoFlavor})`
+        : selectedProduct.name;
 
     const newCartItem: CartItem = {
       id: `${selectedProduct.id}-${cart.length}-${Date.now()}`,
-      name: selectedProduct.name,
+      name: itemName,
       description: selectedProduct.description,
       basePrice: selectedProduct.price,
       price: selectedProduct.price + addOnTotal,
       quantity: 1,
       toppings: [...selectedToppings],
+      tornadoFlavor: isComboTwo ? selectedTornadoFlavor ?? undefined : undefined,
     };
 
     setCart((currentCart) => [
@@ -402,10 +384,9 @@ export default function Home() {
       newCartItem,
     ]);
 
-    const productId = selectedProduct.id;
     setSelectedProduct(null);
     setSelectedToppings([]);
-    centerProductCard(productId);
+    setSelectedTornadoFlavor(null);
   }
 
   function increaseQuantity(itemId: string) {
@@ -789,6 +770,7 @@ export default function Home() {
     setSelectedCategory(null);
     setSelectedProduct(null);
     setSelectedToppings([]);
+    setSelectedTornadoFlavor(null);
     setCart([]);
     setCustomerInfo({
       name: "",
@@ -807,6 +789,7 @@ export default function Home() {
     setSelectedCategory(null);
     setSelectedProduct(null);
     setSelectedToppings([]);
+    setSelectedTornadoFlavor(null);
     setScreen("categories");
   }
 
@@ -1041,8 +1024,15 @@ export default function Home() {
                   key={`category-${category.id}`}
                   type="button"
                   onClick={() => openCategory(category.id)}
-                  className="rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 text-left shadow-[6px_6px_0_#d8eaff] transition hover:-translate-y-1 hover:bg-[#f0f7ff]"
+                  className="group rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 text-left shadow-[6px_6px_0_#d8eaff] transition duration-300 hover:-translate-y-1 hover:bg-[#f0f7ff]"
                 >
+                  <div className="mb-6 flex h-44 items-center justify-center overflow-hidden rounded-[1.5rem] border-2 border-[#d8eaff] bg-[#fffdf1] p-4 sm:h-52">
+                    <img
+                      src={category.image}
+                      alt={category.name}
+                      className="h-full w-full object-contain transition duration-500 ease-out group-hover:scale-105"
+                    />
+                  </div>
 
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -1106,16 +1096,13 @@ export default function Home() {
                   key={`product-${product.id}`}
                   type="button"
                   onClick={() => openProduct(product)}
-                  ref={(element) => {
-                    productCardRefs.current[product.id] = element;
-                  }}
-                  className={`rounded-[2rem] border-4 p-6 text-left transition hover:-translate-y-1 ${
+                  className={`pm-product-card rounded-[2rem] border-4 p-6 text-left transition hover:-translate-y-1 ${
                     product.id === "tornado-cheese"
-                      ? "border-[#e3a51d] bg-[#fff0a6] shadow-[6px_6px_0_#e3a51d] hover:bg-[#ffe58a]"
+                      ? "pm-tornado-cheese border-[#e3a51d] bg-[#fff0a6]/45 shadow-[6px_6px_0_rgba(227,165,29,.55)] hover:bg-[#fff0a6]/60"
                       : product.id === "tornado-sourcream"
-                        ? "border-[#7fa83d] bg-[#dff0a5] shadow-[6px_6px_0_#7fa83d] hover:bg-[#cfe68a]"
+                        ? "pm-tornado-sourcream border-[#7fa83d] bg-[#dff0a5]/45 shadow-[6px_6px_0_rgba(127,168,61,.55)] hover:bg-[#dff0a5]/60"
                         : product.id === "tornado-bbq"
-                          ? "border-[#b95735] bg-[#e98458] shadow-[6px_6px_0_#b95735] hover:bg-[#df7049]"
+                          ? "pm-tornado-bbq border-[#b95735] bg-[#e98458]/45 shadow-[6px_6px_0_rgba(185,87,53,.55)] hover:bg-[#e98458]/60"
                           : "border-[#0756a8] bg-white shadow-[6px_6px_0_#fff0a6] hover:bg-[#fffdf1]"
                   }` }
                 >
@@ -1167,103 +1154,7 @@ export default function Home() {
               ))}
             </div>
 
-            {selectedProduct && (
-              <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#12304f]/60 p-4 sm:items-center">
-                <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[2rem] border-4 border-[#0756a8] bg-white p-6 shadow-[8px_8px_0_#f28c28] sm:p-8">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
-                        Customize your order
-                      </p>
 
-                      <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
-                        {selectedProduct.name}
-                      </h2>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const productId = selectedProduct?.id;
-                        setSelectedProduct(null);
-                        setSelectedToppings([]);
-                        if (productId) centerProductCard(productId);
-                      }}
-                      className="rounded-full bg-[#e9f4ff] px-4 py-2 font-black text-[#0756a8] hover:bg-[#d8ebff]"
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
-                    {selectedProduct.description}
-                  </p>
-
-                  {selectedCategory === "spuds" &&
-                    selectedProduct.id === "spud-supreme" && (
-                      <div className="mt-7">
-                        <h3 className="text-xl font-black text-[#0756a8]">
-                          Choose your toppings
-                        </h3>
-
-                        <p className="mt-1 text-sm font-semibold text-[#45627d]">
-                          Select the toppings you want with your
-                          Spud Supreme.
-                        </p>
-
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          {toppings.map((topping) => {
-                            const isSelected =
-                              selectedToppings.some((item) => item.id === topping.id);
-
-                            return (
-                              <button
-                                key={`topping-${topping.id}`}
-                                type="button"
-                                onClick={() =>
-                                  toggleTopping(topping)
-                                }
-                                className={`rounded-2xl border-2 px-4 py-3 text-left font-bold transition ${
-                                  isSelected
-                                    ? "border-[#0756a8] bg-[#0756a8] text-white"
-                                    : "border-[#c8dff5] bg-[#f8fbff] text-[#0756a8] hover:bg-[#e9f4ff]"
-                                }`}
-                              >
-                                {isSelected ? "✓ " : ""}
-                                {topping.name}
-                                <span className="ml-2 text-sm font-black">+{formatPrice(topping.price)}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                  <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={addToCart}
-                      className="flex-1 rounded-full border-4 border-[#0756a8] bg-[#0756a8] px-6 py-3 font-black text-white transition hover:bg-[#064783]"
-                    >
-                      Add to Cart
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const productId = selectedProduct?.id;
-                        setSelectedProduct(null);
-                        setSelectedToppings([]);
-                        if (productId) centerProductCard(productId);
-                      }}
-                      className="rounded-full border-4 border-[#0756a8] px-6 py-3 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -1320,6 +1211,12 @@ export default function Home() {
                         <p className="mt-2 font-semibold text-[#45627d]">
                           {item.description}
                         </p>
+
+                        {item.tornadoFlavor && (
+                          <p className="mt-3 text-sm font-black text-[#0756a8]">
+                            Tornado Potato Flavor: {item.tornadoFlavor}
+                          </p>
+                        )}
 
                         {item.toppings.length > 0 && (
                           <p className="mt-3 text-sm font-bold text-[#f28c28]">
@@ -1541,7 +1438,7 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "You will need to book a rider separately for pickup and delivery."}
+                      : "We will arrange a rider and you can pay them directly upon arrival."}
                   </p>
                 </div>
 
@@ -1565,6 +1462,12 @@ export default function Home() {
                             ×{item.quantity}
                           </p>
                         </div>
+
+                        {item.tornadoFlavor && (
+                          <p className="mt-1 text-sm font-semibold text-[#0756a8]">
+                            Tornado Potato Flavor: {item.tornadoFlavor}
+                          </p>
+                        )}
 
                         {item.toppings.length > 0 && (
                           <p className="mt-1 text-sm font-semibold text-[#45627d]">
@@ -1665,7 +1568,7 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-[#45627d]">
                     {fulfillment === "Meetup"
                       ? "Meet-up availability and location will be announced on PotatoMania social media."
-                      : "You will need to book a rider separately for pickup and delivery."}
+                      : "We will arrange a rider and you can pay them directly upon arrival"}
                   </p>
                 </div>
 
@@ -1687,6 +1590,12 @@ export default function Home() {
                             ×{item.quantity}
                           </p>
                         </div>
+                        {item.tornadoFlavor && (
+                          <p className="mt-1 text-sm font-semibold text-[#0756a8]">
+                            Tornado Potato Flavor: {item.tornadoFlavor}
+                          </p>
+                        )}
+
                         {item.toppings.length > 0 && (
                           <p className="mt-1 text-sm font-semibold text-[#45627d]">
                             Toppings:{" "}
@@ -2107,6 +2016,144 @@ export default function Home() {
         )}
       </section>
 
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain p-4 sm:p-6">
+          <div className="pm-modal-card max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-x-hidden overflow-y-auto overscroll-contain rounded-[2rem] border-2 border-white/75 bg-white/30 p-6 shadow-[8px_10px_0_rgba(242,140,40,.62)] sm:max-h-[90vh] sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-black uppercase tracking-widest text-[#f28c28]">
+            Customize your order
+                </p>
+
+                <h2 className="mt-2 text-3xl font-black text-[#0756a8]">
+            {selectedProduct.name}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+            setSelectedProduct(null);
+            setSelectedToppings([]);
+            setSelectedTornadoFlavor(null);
+                }}
+                className="rounded-full bg-[#e9f4ff] px-4 py-2 font-black text-[#0756a8] hover:bg-[#d8ebff]"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mt-4 font-semibold leading-relaxed text-[#45627d]">
+              {selectedProduct.description}
+            </p>
+
+            {selectedProduct.id === "combo-2" && (
+              <div className="mt-7">
+                <h3 className="text-xl font-black text-[#0756a8]">
+                  Choose your Tornado Potato flavor
+                </h3>
+
+                <p className="mt-1 text-sm font-semibold text-[#45627d]">
+                  Pick one flavor for your Combo 2.
+                </p>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {(["Cheese", "Sourcream", "BBQ"] as const).map((flavor) => {
+                    const isSelected = selectedTornadoFlavor === flavor;
+
+                    return (
+                      <button
+                        key={`combo-2-flavor-${flavor}`}
+                        type="button"
+                        onClick={() => setSelectedTornadoFlavor(flavor)}
+                        className={`pm-flavor-option rounded-2xl border-2 px-4 py-4 text-center font-black transition backdrop-blur-xl ${
+                          flavor === "Cheese"
+                            ? isSelected
+                              ? "border-[#e3a51d] bg-[#fff0a6]/80 text-[#7a5600] shadow-[0_0_22px_rgba(227,165,29,0.35)]"
+                              : "border-[#e3a51d]/70 bg-[#fff0a6]/35 text-[#7a5600] hover:bg-[#fff0a6]/60"
+                            : flavor === "Sourcream"
+                              ? isSelected
+                                ? "border-[#7fa83d] bg-[#dff0a5]/80 text-[#4d6820] shadow-[0_0_22px_rgba(127,168,61,0.35)]"
+                                : "border-[#7fa83d]/70 bg-[#dff0a5]/35 text-[#4d6820] hover:bg-[#dff0a5]/60"
+                              : isSelected
+                                ? "border-[#b95735] bg-[#e98458]/80 text-[#6e2815] shadow-[0_0_22px_rgba(185,87,53,0.35)]"
+                                : "border-[#b95735]/70 bg-[#e98458]/35 text-[#6e2815] hover:bg-[#e98458]/60"
+                        }`}
+                      >
+                        {isSelected ? "✓ " : ""}
+                        {flavor}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {selectedCategory === "spuds" &&
+              selectedProduct.id === "spud-supreme" && (
+                <div className="mt-7">
+            <h3 className="text-xl font-black text-[#0756a8]">
+              Choose your toppings
+            </h3>
+
+            <p className="mt-1 text-sm font-semibold text-[#45627d]">
+              Select the toppings you want with your
+              Spud Supreme.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {toppings.map((topping) => {
+                const isSelected =
+                  selectedToppings.some((item) => item.id === topping.id);
+
+                return (
+                  <button
+                    key={`topping-${topping.id}`}
+                    type="button"
+                    onClick={() =>
+                      toggleTopping(topping)
+                    }
+                    className={`rounded-2xl border-2 px-4 py-3 text-left font-bold transition ${
+                      isSelected
+                  ? "border-[#0756a8] bg-[#0756a8] text-white"
+                  : "border-[#c8dff5] bg-[#f8fbff] text-[#0756a8] hover:bg-[#e9f4ff]"
+                    }`}
+                  >
+                    {isSelected ? "✓ " : ""}
+                    {topping.name}
+                    <span className="ml-2 text-sm font-black">+{formatPrice(topping.price)}</span>
+                  </button>
+                );
+              })}
+            </div>
+                </div>
+              )}
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={addToCart}
+                className="flex-1 rounded-full border-4 border-[#0756a8] bg-[#0756a8] px-6 py-3 font-black text-white transition hover:bg-[#064783]"
+              >
+                Add to Cart
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+            setSelectedProduct(null);
+            setSelectedToppings([]);
+            setSelectedTornadoFlavor(null);
+                }}
+                className="rounded-full border-4 border-[#0756a8] px-6 py-3 font-black text-[#0756a8] transition hover:bg-[#e9f4ff]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {screen !== "welcome" &&
         screen !== "fulfillment" &&
         screen !== "cart" &&
@@ -2115,7 +2162,7 @@ export default function Home() {
         screen !== "receipt" &&
         screen !== "success" &&
         cartQuantity > 0 && (
-          <div className="fixed bottom-5 left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-full border-4 border-white bg-[#0756a8] p-2 shadow-2xl">
+          <div className="pm-floating-cart fixed inset-x-0 bottom-5 z-50 mx-auto w-[calc(100%-2rem)] max-w-md rounded-full border-4 border-white bg-[#0756a8] p-2 shadow-2xl">
             <button
               type="button"
               onClick={goToCart}
@@ -2309,10 +2356,240 @@ export default function Home() {
         .pm-spark-four { right: 8%; bottom: 22%; font-size: 19px; animation-delay: -3s; }
 
         .pm-header {
-          background: rgba(255, 255, 255, .78) !important;
-          -webkit-backdrop-filter: blur(18px);
-          backdrop-filter: blur(18px);
+          background: rgba(255, 255, 255, .68) !important;
+          -webkit-backdrop-filter: blur(20px) saturate(1.18);
+          backdrop-filter: blur(20px) saturate(1.18);
           box-shadow: 0 8px 30px rgba(18, 48, 79, .08);
+          border-bottom-color: rgba(7, 86, 168, .72) !important;
+          animation: pmHeaderFloat .8s cubic-bezier(.2,.75,.25,1) both;
+        }
+
+        .pm-header::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,.45) 42%, transparent 58%);
+          transform: translateX(-120%);
+          animation: pmHeaderShine 7s ease-in-out infinite;
+        }
+
+        .pm-content .grid > button,
+        .pm-content .space-y-5 > div,
+        .pm-content > div > .rounded-\[2rem\],
+        .pm-content > div > .rounded-\[2\.5rem\] {
+          -webkit-backdrop-filter: blur(12px) saturate(1.08);
+          backdrop-filter: blur(12px) saturate(1.08);
+          transform-style: preserve-3d;
+          will-change: transform, box-shadow;
+        }
+
+        .pm-content .grid > button {
+          transition:
+            transform .38s cubic-bezier(.2,.75,.25,1),
+            box-shadow .38s ease,
+            border-color .3s ease,
+            filter .38s ease;
+        }
+
+        .pm-content .grid > button:hover {
+          transform: translateY(-8px) rotateX(1.2deg) rotateY(-1deg);
+          box-shadow:
+            0 18px 36px rgba(18,48,79,.14),
+            0 0 0 1px rgba(255,255,255,.65) inset,
+            0 0 28px rgba(7,86,168,.08);
+          filter: saturate(1.04);
+        }
+
+        .pm-content .grid > button:active {
+          transform: translateY(-1px) scale(.985);
+        }
+
+        .pm-content .grid > button::before {
+          content: "";
+          position: absolute;
+          inset: 1px;
+          border-radius: inherit;
+          pointer-events: none;
+          opacity: 0;
+          background: radial-gradient(circle at 18% 8%, rgba(255,255,255,.62), transparent 34%);
+          transition: opacity .35s ease;
+        }
+
+        .pm-content .grid > button:hover::before {
+          opacity: 1;
+        }
+
+        .pm-content .grid > button > div:first-child {
+          transform: translateZ(6px);
+        }
+
+        .pm-content .grid > button:hover img {
+          transform: scale(1.08) rotate(-2deg) translateY(-2px);
+          filter: drop-shadow(0 14px 18px rgba(18,48,79,.16));
+        }
+
+        .pm-content .grid > button img {
+          transition: transform .55s cubic-bezier(.2,.75,.25,1), filter .45s ease;
+        }
+
+        .pm-content .rounded-\[2rem\],
+        .pm-content .rounded-\[2\.5rem\] {
+          box-shadow: 8px 10px 0 rgba(242,140,40,.72), 0 18px 42px rgba(18,48,79,.07);
+          transition: transform .4s cubic-bezier(.2,.75,.25,1), box-shadow .4s ease;
+        }
+
+        .pm-content .rounded-\[2rem\]:hover,
+        .pm-content .rounded-\[2\.5rem\]:hover {
+          box-shadow: 10px 16px 0 rgba(242,140,40,.78), 0 24px 50px rgba(18,48,79,.11);
+        }
+
+        .pm-content button:not(.grid > button) {
+          transition: transform .25s cubic-bezier(.2,.75,.25,1), box-shadow .25s ease, background-color .25s ease, filter .25s ease;
+        }
+
+        .pm-content button:not(.grid > button):hover {
+          filter: brightness(1.02);
+        }
+
+        .pm-content a,
+        .pm-content button {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .pm-modal-card {
+          position: relative;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(7,86,168,.42) transparent;
+          overflow-x: hidden;
+          overflow-y: auto;
+          isolation: isolate;
+          background: linear-gradient(135deg, rgba(255,255,255,.52), rgba(255,255,255,.20) 48%, rgba(255,255,255,.34)) !important;
+          -webkit-backdrop-filter: blur(30px) saturate(1.45) contrast(1.03);
+          backdrop-filter: blur(30px) saturate(1.45) contrast(1.03);
+          border-color: rgba(255,255,255,.78) !important;
+          box-shadow:
+            10px 12px 0 rgba(242,140,40,.62),
+            0 28px 70px rgba(18,48,79,.22),
+            0 0 0 1px rgba(255,255,255,.88) inset,
+            0 0 42px rgba(255,255,255,.22);
+          animation: pmModalIn .42s cubic-bezier(.2,.8,.2,1) both;
+          transition: transform .45s cubic-bezier(.2,.75,.25,1), box-shadow .45s ease;
+        }
+
+        .pm-modal-card::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .pm-modal-card::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        .pm-modal-card::-webkit-scrollbar-thumb {
+          border-radius: 9999px;
+          background: rgba(7,86,168,.34);
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+
+        .pm-modal-card::-webkit-scrollbar-thumb:hover {
+          background: rgba(7,86,168,.55);
+          background-clip: padding-box;
+        }
+
+        .pm-modal-card:hover {
+          transform: translateY(-3px);
+          box-shadow:
+            12px 16px 0 rgba(242,140,40,.68),
+            0 34px 82px rgba(18,48,79,.25),
+            0 0 0 1px rgba(255,255,255,.92) inset,
+            0 0 55px rgba(255,255,255,.28);
+        }
+
+        .pm-modal-card::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          background:
+            radial-gradient(circle at 12% 8%, rgba(255,255,255,.80), transparent 24%),
+            radial-gradient(circle at 88% 92%, rgba(255,216,74,.18), transparent 30%),
+            linear-gradient(120deg, rgba(255,255,255,.18), transparent 38%, rgba(255,255,255,.12) 72%, transparent);
+        }
+
+        .pm-modal-card::after {
+          content: "";
+          position: absolute;
+          top: -55%;
+          left: -80%;
+          width: 42%;
+          height: 210%;
+          pointer-events: none;
+          z-index: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,.58), transparent);
+          transform: rotate(18deg);
+          animation: pmModalShine 7s ease-in-out infinite;
+        }
+
+        .pm-modal-card > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        .pm-modal-card h2,
+        .pm-modal-card h3,
+        .pm-modal-card p,
+        .pm-modal-card label {
+          text-shadow: 0 1px 10px rgba(255,255,255,.38);
+        }
+
+        .pm-modal-card .rounded-2xl {
+          background: rgba(255,255,255,.30) !important;
+          border-color: rgba(255,255,255,.70) !important;
+          -webkit-backdrop-filter: blur(16px) saturate(1.25);
+          backdrop-filter: blur(16px) saturate(1.25);
+          box-shadow: 0 8px 22px rgba(18,48,79,.07), 0 0 0 1px rgba(255,255,255,.25) inset;
+          transition: transform .25s ease, box-shadow .25s ease, background-color .25s ease;
+        }
+
+        .pm-modal-card .rounded-2xl:hover {
+          background: rgba(255,255,255,.46) !important;
+          transform: translateY(-2px);
+          box-shadow: 0 12px 28px rgba(18,48,79,.10), 0 0 0 1px rgba(255,255,255,.48) inset;
+        }
+
+        .pm-modal-card button {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .pm-modal-card > div:first-child > button {
+          background: rgba(255,255,255,.42) !important;
+          border: 1px solid rgba(255,255,255,.72);
+          -webkit-backdrop-filter: blur(14px);
+          backdrop-filter: blur(14px);
+          box-shadow: 0 6px 18px rgba(18,48,79,.08), 0 0 0 1px rgba(255,255,255,.22) inset;
+          transition: transform .25s ease, background-color .25s ease, box-shadow .25s ease;
+        }
+
+        .pm-modal-card > div:first-child > button:hover {
+          transform: rotate(2deg) scale(1.04);
+          background: rgba(255,255,255,.64) !important;
+          box-shadow: 0 10px 24px rgba(18,48,79,.12), 0 0 0 1px rgba(255,255,255,.42) inset;
+        }
+
+        .pm-floating-cart {
+          -webkit-backdrop-filter: blur(18px) saturate(1.15);
+          backdrop-filter: blur(18px) saturate(1.15);
+          box-shadow: 0 16px 36px rgba(18,48,79,.18);
+          animation: pmCartFloat 3.5s ease-in-out infinite;
+        }
+
+        .pm-floating-cart button:hover {
+          transform: translateY(-2px) scale(1.015);
+          box-shadow: 0 8px 20px rgba(7,86,168,.14);
         }
 
         .pm-progress {
@@ -2444,6 +2721,37 @@ export default function Home() {
         @keyframes pmSpark {
           0%, 100% { opacity: .18; transform: translateY(4px) scale(.8) rotate(0deg); }
           50% { opacity: .5; transform: translateY(-7px) scale(1.1) rotate(18deg); }
+        }
+
+        @keyframes pmHeaderFloat {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pmHeaderShine {
+          0%, 72%, 100% { transform: translateX(-120%); }
+          84% { transform: translateX(120%); }
+        }
+
+        @keyframes pmModalIn {
+          from { opacity: 0; transform: translateY(18px) scale(.96) rotateX(2deg); filter: blur(3px); }
+          to { opacity: 1; transform: translateY(0) scale(1) rotateX(0); filter: blur(0); }
+        }
+
+        @keyframes pmModalShine {
+          0%, 58%, 100% { left: -80%; opacity: 0; }
+          64% { opacity: .72; }
+          76% { left: 145%; opacity: 0; }
+        }
+
+        @keyframes pmGlassBreath {
+          0%, 100% { transform: translate3d(-2%, -1%, 0) scale(.95); opacity: .55; }
+          50% { transform: translate3d(5%, 4%, 0) scale(1.05); opacity: .9; }
+        }
+
+        @keyframes pmCartFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-4px); }
         }
 
         @keyframes pmProgressPulse {
@@ -2689,11 +2997,399 @@ export default function Home() {
           100% { opacity: .08; transform: scale(1.25); }
         }
 
+        /* Responsive layout: keep the kiosk intact from small phones to large screens. */
+        .pm-shell,
+        .pm-content,
+        .pm-header,
+        .pm-footer {
+          min-width: 0;
+        }
+
+        .pm-content {
+          width: 100%;
+        }
+
+        .pm-modal-card {
+          width: min(100%, 42rem);
+          max-width: calc(100vw - 2rem);
+          max-height: calc(100dvh - 2rem);
+          min-height: 0;
+          overscroll-behavior: contain;
+          touch-action: pan-y;
+        }
+
+        .pm-modal-card img {
+          max-width: 100%;
+        }
+
+        .pm-floating-cart {
+          bottom: max(1.25rem, env(safe-area-inset-bottom));
+        }
+
+        @media (max-width: 900px) {
+          .pm-content {
+            max-width: 100% !important;
+          }
+
+          .pm-header > div {
+            max-width: 100% !important;
+          }
+
+          .pm-content .grid > button {
+            min-width: 0;
+          }
+        }
+
         @media (max-width: 640px) {
           .pm-potato { font-size: 25px; opacity: .09; }
           .pm-cheese { opacity: .18; transform: scale(.78); }
           .pm-spark { font-size: 15px; }
           .pm-orb { opacity: .35; }
+
+          .pm-header {
+            border-bottom-width: 3px !important;
+          }
+
+          .pm-header > div {
+            gap: .65rem;
+            padding-left: .85rem !important;
+            padding-right: .85rem !important;
+            padding-top: .7rem !important;
+            padding-bottom: .7rem !important;
+          }
+
+          .pm-header > div > button {
+            min-width: 0;
+            flex: 1 1 auto;
+          }
+
+          .pm-header > div > button img {
+            height: 2.75rem !important;
+            width: 2.75rem !important;
+            flex: 0 0 auto;
+          }
+
+          .pm-header > div > button p:first-child {
+            font-size: .95rem !important;
+          }
+
+          .pm-header > div > button p:last-child {
+            font-size: .58rem !important;
+            letter-spacing: .06em !important;
+            white-space: nowrap;
+          }
+
+          .pm-progress {
+            flex: 0 0 auto;
+            padding: .45rem .65rem !important;
+            font-size: .68rem !important;
+            white-space: nowrap;
+          }
+
+          .pm-content {
+            padding-left: .85rem !important;
+            padding-right: .85rem !important;
+            padding-top: 1.25rem !important;
+          }
+
+          .pm-content h1 {
+            font-size: clamp(1.85rem, 8vw, 2.5rem);
+            line-height: 1.05;
+            overflow-wrap: anywhere;
+          }
+
+          .pm-content h2 {
+            overflow-wrap: anywhere;
+          }
+
+          .pm-content .grid {
+            gap: .8rem;
+          }
+
+          .pm-content .grid > button {
+            padding: 1rem !important;
+            border-width: 3px !important;
+            border-radius: 1.5rem !important;
+          }
+
+          .pm-content .grid > button > div:first-child {
+            min-height: 7rem;
+          }
+
+          .pm-content .grid > button img {
+            max-width: 100%;
+          }
+
+          .pm-content .rounded-\[2rem\],
+          .pm-content .rounded-\[2\.5rem\] {
+            border-width: 3px;
+          }
+
+          .pm-floating-cart {
+            width: calc(100% - 1rem);
+            max-width: 28rem;
+            bottom: max(.55rem, env(safe-area-inset-bottom));
+            padding: .35rem;
+            border-width: 3px;
+          }
+
+          .pm-floating-cart button {
+            min-height: 3.15rem;
+          }
+
+          .pm-modal-card {
+            max-width: calc(100vw - 1rem);
+            max-height: calc(100dvh - 1rem);
+            border-radius: 1.45rem !important;
+            border-width: 2px !important;
+            padding: 1rem !important;
+            box-shadow:
+              6px 8px 0 rgba(242,140,40,.58),
+              0 18px 44px rgba(18,48,79,.22),
+              0 0 0 1px rgba(255,255,255,.88) inset,
+              0 0 30px rgba(255,255,255,.20);
+          }
+
+          .pm-modal-card > div:first-child {
+            gap: .65rem;
+          }
+
+          .pm-modal-card > div:first-child > div {
+            min-width: 0;
+          }
+
+          .pm-modal-card > div:first-child > div p {
+            font-size: .65rem;
+            line-height: 1.2;
+          }
+
+          .pm-modal-card > div:first-child > div h2 {
+            margin-top: .35rem;
+            font-size: clamp(1.45rem, 7vw, 2rem);
+            line-height: 1.05;
+          }
+
+          .pm-modal-card > div:first-child > button {
+            flex: 0 0 auto;
+            padding: .55rem .75rem !important;
+            font-size: .8rem;
+          }
+
+          .pm-modal-card .grid.sm\:grid-cols-2 {
+            grid-template-columns: 1fr !important;
+          }
+
+          .pm-modal-card .rounded-2xl {
+            min-width: 0;
+          }
+
+          .pm-modal-card button {
+            overflow-wrap: anywhere;
+          }
+
+          .pm-modal-card .flex.sm\:flex-row {
+            flex-direction: column !important;
+          }
+
+          .pm-modal-card .flex.sm\:flex-row > button {
+            width: 100%;
+          }
+
+          .pm-modal-card::after {
+            animation-duration: 8s;
+          }
+
+          /* Prevent touch devices from getting a hover-style lift after tapping. */
+          @media (hover: none) {
+            .pm-content button:hover,
+            .pm-content .grid > button:hover,
+            .pm-content .rounded-\[2rem\]:hover,
+            .pm-content .rounded-\[2\.5rem\]:hover,
+            .pm-modal-card:hover,
+            .pm-modal-card .rounded-2xl:hover {
+              transform: none;
+            }
+          }
+        }
+
+        @media (max-width: 380px) {
+          .pm-header > div > button p:first-child {
+            font-size: .82rem !important;
+          }
+
+          .pm-header > div > button p:last-child {
+            font-size: .5rem !important;
+          }
+
+          .pm-header > div > button img {
+            height: 2.4rem !important;
+            width: 2.4rem !important;
+          }
+
+          .pm-progress {
+            padding: .38rem .5rem !important;
+            font-size: .6rem !important;
+          }
+
+          .pm-content {
+            padding-left: .65rem !important;
+            padding-right: .65rem !important;
+          }
+
+          .pm-content .grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .pm-modal-card {
+            max-width: calc(100vw - .6rem);
+            max-height: calc(100dvh - .6rem);
+            padding: .8rem !important;
+            border-radius: 1.25rem !important;
+          }
+
+          .pm-modal-card .mt-7 {
+            margin-top: 1.15rem !important;
+          }
+
+          .pm-modal-card .mt-8 {
+            margin-top: 1.15rem !important;
+          }
+
+          .pm-modal-card .rounded-2xl {
+            padding: .7rem !important;
+          }
+
+          .pm-floating-cart {
+            width: calc(100% - .7rem);
+          }
+        }
+
+        @media (max-height: 560px) and (orientation: landscape) {
+          .pm-content {
+            padding-top: .8rem !important;
+            padding-bottom: 6rem !important;
+          }
+
+          .pm-modal-card {
+            max-height: calc(100dvh - .75rem);
+            padding: .8rem !important;
+          }
+
+          .pm-modal-card > div:first-child > div h2 {
+            font-size: 1.4rem;
+          }
+
+          .pm-modal-card .mt-7,
+          .pm-modal-card .mt-8 {
+            margin-top: .9rem !important;
+          }
+        }
+
+        /* Global glassmorphism: keep every major kiosk panel visually consistent. */
+        .pm-header,
+        .pm-footer {
+          background: linear-gradient(135deg, rgba(255,255,255,.62), rgba(255,255,255,.28) 52%, rgba(255,244,184,.34)) !important;
+          -webkit-backdrop-filter: blur(22px) saturate(1.35);
+          backdrop-filter: blur(22px) saturate(1.35);
+          border-color: rgba(255,255,255,.72) !important;
+          box-shadow: 0 10px 32px rgba(18,48,79,.08), 0 0 0 1px rgba(255,255,255,.38) inset;
+        }
+
+        .pm-content .rounded-\[2rem\],
+        .pm-content .rounded-\[2\.5rem\],
+        .pm-content .rounded-3xl {
+          background: linear-gradient(135deg, rgba(255,255,255,.52), rgba(255,255,255,.24) 55%, rgba(255,244,184,.22)) !important;
+          -webkit-backdrop-filter: blur(20px) saturate(1.3);
+          backdrop-filter: blur(20px) saturate(1.3);
+          border-color: rgba(255,255,255,.72) !important;
+          box-shadow:
+            8px 10px 0 rgba(242,140,40,.42),
+            0 18px 42px rgba(18,48,79,.10),
+            0 0 0 1px rgba(255,255,255,.30) inset;
+        }
+
+        .pm-content .rounded-\[2rem\]:hover,
+        .pm-content .rounded-\[2\.5rem\]:hover,
+        .pm-content .rounded-3xl:hover {
+          background: linear-gradient(135deg, rgba(255,255,255,.64), rgba(255,255,255,.34) 55%, rgba(255,244,184,.28)) !important;
+          border-color: rgba(255,255,255,.88) !important;
+          box-shadow:
+            10px 14px 0 rgba(242,140,40,.50),
+            0 24px 52px rgba(18,48,79,.13),
+            0 0 0 1px rgba(255,255,255,.48) inset;
+        }
+
+        /* The checkout/receipt image must stay opaque so saved receipts remain clean. */
+        .pm-content #potatomania-receipt {
+          background: #ffffff !important;
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+          border-color: #0756a8 !important;
+          box-shadow: 8px 8px 0 #f28c28 !important;
+        }
+
+        .pm-content #potatomania-receipt .rounded-2xl {
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+        }
+
+        /* Standalone Tornado Potato cards keep their original flavor colors while using the same glassmorphism. */
+        .pm-content .pm-product-card.pm-tornado-cheese,
+        .pm-content .pm-product-card.pm-tornado-sourcream,
+        .pm-content .pm-product-card.pm-tornado-bbq {
+          -webkit-backdrop-filter: blur(18px) saturate(1.3);
+          backdrop-filter: blur(18px) saturate(1.3);
+          border-width: 2px !important;
+          box-shadow:
+            6px 6px 0 rgba(18,48,79,.10),
+            0 18px 40px rgba(18,48,79,.10),
+            0 0 0 1px rgba(255,255,255,.38) inset !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-cheese {
+          background: linear-gradient(135deg, rgba(255,240,166,.62), rgba(255,255,255,.28) 55%, rgba(227,165,29,.20)) !important;
+          border-color: rgba(227,165,29,.78) !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-sourcream {
+          background: linear-gradient(135deg, rgba(223,240,165,.62), rgba(255,255,255,.28) 55%, rgba(127,168,61,.20)) !important;
+          border-color: rgba(127,168,61,.78) !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-bbq {
+          background: linear-gradient(135deg, rgba(233,132,88,.58), rgba(255,255,255,.28) 55%, rgba(185,87,53,.20)) !important;
+          border-color: rgba(185,87,53,.78) !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-cheese:hover {
+          background: linear-gradient(135deg, rgba(255,240,166,.76), rgba(255,255,255,.38) 55%, rgba(227,165,29,.28)) !important;
+          box-shadow: 8px 10px 0 rgba(227,165,29,.34), 0 24px 48px rgba(18,48,79,.13), 0 0 0 1px rgba(255,255,255,.52) inset !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-sourcream:hover {
+          background: linear-gradient(135deg, rgba(223,240,165,.76), rgba(255,255,255,.38) 55%, rgba(127,168,61,.28)) !important;
+          box-shadow: 8px 10px 0 rgba(127,168,61,.34), 0 24px 48px rgba(18,48,79,.13), 0 0 0 1px rgba(255,255,255,.52) inset !important;
+        }
+
+        .pm-content .pm-product-card.pm-tornado-bbq:hover {
+          background: linear-gradient(135deg, rgba(233,132,88,.72), rgba(255,255,255,.38) 55%, rgba(185,87,53,.28)) !important;
+          box-shadow: 8px 10px 0 rgba(185,87,53,.34), 0 24px 48px rgba(18,48,79,.13), 0 0 0 1px rgba(255,255,255,.52) inset !important;
+        }
+
+        /* Combo 2 flavor choices use the exact same glass-card treatment as the other modal choices. */
+        .pm-modal-card .pm-flavor-option {
+          background: rgba(255,255,255,.30) !important;
+          border-color: rgba(255,255,255,.72) !important;
+          -webkit-backdrop-filter: blur(16px) saturate(1.25);
+          backdrop-filter: blur(16px) saturate(1.25);
+          box-shadow: 0 8px 22px rgba(18,48,79,.07), 0 0 0 1px rgba(255,255,255,.25) inset;
+        }
+
+        .pm-modal-card .pm-flavor-option:hover {
+          background: rgba(255,255,255,.46) !important;
+          border-color: rgba(255,255,255,.92) !important;
+          transform: translateY(-2px);
+          box-shadow: 0 12px 28px rgba(18,48,79,.10), 0 0 0 1px rgba(255,255,255,.48) inset;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -2703,7 +3399,11 @@ export default function Home() {
           .pm-progress,
           .pm-content > div,
           .pm-drive-transition *,
-          .pm-drive-transition {
+          .pm-drive-transition,
+          .pm-modal-card,
+          .pm-modal-card::before,
+          .pm-floating-cart,
+          .pm-header::after {
             animation: none !important;
           }
 
@@ -2724,7 +3424,7 @@ export default function Home() {
 
       <footer className="pm-footer relative z-10 mt-12 border-t-4 border-[#0756a8] bg-white px-5 py-6 text-center">
         <p className="font-black text-[#0756a8]">
-          PotatoMania
+          Potatomania
         </p>
 
         <p className="mt-1 text-sm font-semibold text-[#45627d]">
